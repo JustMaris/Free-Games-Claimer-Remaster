@@ -1,12 +1,15 @@
-__pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
 data/
 .env
-.venv/
+.venv*/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 .git/
 *.md
-# ...except the README: tests/test_docs_env.py checks the config table against it.
-!README.md
 
 # VCS & tooling (not needed in the image)
 .gitignore

@@ -349,9 +349,10 @@ reported at startup rather than being ignored silently.
 free-games-claimer-remaster/
 ├── main.py                 # Entry point + scheduler + CLI + run summary
 ├── docker-compose.yml      # Container configuration
-├── Dockerfile              # Debian bookworm-slim + Chrome/Chromium + TurboVNC + noVNC
-├── docker-entrypoint.sh    # Starts the virtual display, VNC and the bot
-├── requirements.txt        # Python dependencies
+├── Dockerfile              # Debian bookworm-slim + Chromium + on-demand VNC
+├── docker-entrypoint.sh    # Prepares the container and starts the bot
+├── requirements.txt        # Runtime Python dependencies
+├── requirements-dev.txt    # Runtime + test dependencies
 ├── CHANGELOG.md            # What changed in every release
 ├── MODIFICATIONS.md        # Codebase overhaul technical reference
 ├── WINDOWS_BEGINNER_GUIDE.md

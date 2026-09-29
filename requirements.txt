@@ -20,7 +20,8 @@ tenacity>=9.1.4
 
 # Scheduler
 APScheduler>=3.11.3
-tzdata>=2026.3
+# Linux containers use the system timezone database; Windows needs the wheel.
+tzdata>=2026.3; platform_system == "Windows"
 
 # OTP / 2FA
 pyotp>=2.10.0
@@ -33,6 +34,3 @@ rich>=15.0.0
 
 # HTTP client
 httpx>=0.28.1
-
-# Tests (development only, not needed to run the bot)
-pytest>=9.1.1

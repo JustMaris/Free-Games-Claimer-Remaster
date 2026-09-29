@@ -1,88 +1,42 @@
-# ──────────────────────────────────────────────────────────────
-# Free Games Claimer Remaster – Docker image
-#
-# This file tells Docker how to build the container that runs
-# the bot.  It installs Python, a virtual display (so Chrome
-# can run without a real monitor), and a web-based VNC viewer
-# so you can watch the browser remotely.
-# ──────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS python-deps
 
-# Start from Debian Bookworm (a lightweight Linux distribution).
-# Using Debian instead of Alpine because Chrome needs glibc.
+ARG DEBIAN_FRONTEND=noninteractive
+COPY requirements.txt /tmp/requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && pip install --no-cache-dir --break-system-packages --target /opt/python -r /tmp/requirements.txt \
+    && find /opt/python -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /opt/python -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
 FROM debian:bookworm-slim
 
-# Use bash as the shell (instead of sh) for better scripting support
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Prevent interactive prompts during package installation
 ARG DEBIAN_FRONTEND=noninteractive
 
-# ── Install all system dependencies in a single RUN to reduce image layers ──
-# Harden apt against download hangs first: force IPv4 (apt otherwise waits on
-# a slow IPv6 timeout inside Docker), and add retries + timeouts so a stuck
-# mirror aborts and retries instead of hanging the whole build indefinitely.
 RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99fgc-net \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        # Core tools: curl for downloads and ca-certificates for HTTPS
-        curl ca-certificates \
-        # Python and pip (the bot is written in Python)
-        python3 python3-pip \
-        # dos2unix fixes Windows line endings; tini is a proper init process for Docker
-        dos2unix tini \
-    && mkdir -p /etc/apt/keyrings \
-    && apt-get install --no-install-recommends -y \
-        xvfb x11vnc x11-utils \
-        novnc websockify \
-    # ── Shared libraries required by Chrome/Chromium ──
-    && apt-get install -y --no-install-recommends \
-        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
-        libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
-        libgbm1 libpango-1.0-0 libcairo2 libasound2 \
-        libxfixes3 libxdamage1 \
-    # ── Install Chromium from Debian on every architecture ──
-    && apt-get install --no-install-recommends -y chromium \
-    # Neutralise xdg-open (installed as a hard dependency of Chrome): make it a
-    # silent no-op so Chrome's external-protocol handler for app schemes
-    # (aliexpress://, intent://, alipay://, …) can never pop the blocking
-    # "Open xdg-open?" system dialog seen in VNC. Complements the in-page JS
-    # blocking in the AliExpress module.
+        ca-certificates tini python3 \
+        xvfb x11vnc novnc websockify \
+        chromium \
     && printf '#!/bin/sh\nexit 0\n' > /usr/bin/xdg-open \
     && chmod +x /usr/bin/xdg-open \
-    # Suppress Chrome's "Open xdg-open?" confirmation dialog itself. Neutralising
-    # xdg-open only makes the launch a no-op AFTER the user clicks, the prompt is
-    # shown by Chrome BEFORE that. The AutoLaunchProtocolsFromOrigins managed
-    # policy tells Chrome to launch these AliExpress/Alibaba app schemes without
-    # prompting; combined with the no-op xdg-open above, the launch does nothing.
     && mkdir -p /etc/opt/chrome/policies/managed /etc/chromium/policies/managed \
     && printf '%s\n' '{"AutoLaunchProtocolsFromOrigins":[{"protocol":"aliexpress","allowed_origins":["*"]},{"protocol":"aliexpresshd","allowed_origins":["*"]},{"protocol":"aecmd","allowed_origins":["*"]},{"protocol":"alibaba","allowed_origins":["*"]},{"protocol":"alipay","allowed_origins":["*"]},{"protocol":"alipays","allowed_origins":["*"]},{"protocol":"tmall","allowed_origins":["*"]},{"protocol":"taobao","allowed_origins":["*"]},{"protocol":"market","allowed_origins":["*"]},{"protocol":"intent","allowed_origins":["*"]}]}' \
        | tee /etc/opt/chrome/policies/managed/fgc-autolaunch.json /etc/chromium/policies/managed/fgc-autolaunch.json > /dev/null \
-    # Clean up package manager cache to reduce image size
-    && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/* /var/tmp/* /tmp/* /usr/share/doc/* \
-    # Create a convenient noVNC landing page
-    && ln -s /usr/share/novnc/vnc_auto.html /usr/share/novnc/index.html \
-    # Make "python" command available (Debian only has "python3" by default)
+    && ln -sf /usr/share/novnc/vnc_auto.html /usr/share/novnc/index.html \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
-# Set the working directory inside the container
+COPY --from=python-deps /opt/python /opt/python
+ENV PYTHONPATH=/opt/python
+
 WORKDIR /fgc
+COPY main.py .env.example status_index.html ./
+COPY src ./src
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-# ── Install Python libraries (like playwright, sqlalchemy, etc.) ──
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
-
-# ── Copy the application source code into the container ──
-COPY . .
-
-# Fix Windows-style line endings (\r\n → \n) in shell scripts and make them executable
-RUN dos2unix ./*.sh && chmod +x ./*.sh
-RUN cp docker-entrypoint.sh /usr/local/bin/
-
-# ── Build information (injected by CI/CD during docker build) ──
-# These variables are baked into the image so the startup banner can show
-# which commit and branch the image was built from.
 ARG COMMIT=""
 ARG BRANCH=""
 ARG NOW=""
@@ -90,22 +44,18 @@ ENV COMMIT=${COMMIT}
 ENV BRANCH=${BRANCH}
 ENV NOW=${NOW}
 
-# ── VNC settings (remote desktop access via web browser) ──
 ENV VNC_PORT=5900
 ENV NOVNC_PORT=7080
-ENV VNC_MODE=on
+ENV VNC_MODE=auto
 ENV VNC_IDLE_TIMEOUT=60
 EXPOSE 7080
 
-# ── Display settings (virtual screen resolution for the browser) ──
 ENV WIDTH=1280
 ENV HEIGHT=720
 ENV DEPTH=24
 ENV SHOW=1
 
-# ── Health check: Docker uses this to know if the application is still running ──
-HEALTHCHECK --interval=10s --timeout=5s CMD pgrep python3 || exit 1
+HEALTHCHECK --interval=10s --timeout=5s CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7080/status.json', timeout=3).read()"]
 
-# ── Container startup: run the entrypoint script first, then start the bot ──
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["python3", "main.py"]
