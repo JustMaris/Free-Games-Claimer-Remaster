@@ -631,36 +631,42 @@ class BaseClaimer:
             self.logger.info("Nobody answered the last prompt, so this step is skipped.")
             return False
 
-        if custom_msg:
-            msg = custom_msg
-        else:
-            msg = self._vnc_notice(
-                f"{self.store_name}: manual login needed",
-                "Finish signing in in the browser.",
-                timeout,
-            )
-        self.logger.info("Open %s to finish manually (waiting %ds).", cfg.vnc_url, timeout)
+        from src.core.vnc import vnc_manager
+        if not vnc_manager.available:
+            self.logger.info("Manual action is needed, but VNC_MODE=off; skipping this step.")
+            mark_unanswered(key)
+            return False
 
-        if cfg.notify_login_request and self.notify_enabled:
-            await notify(msg)
+        async with vnc_manager.lease():
+            if custom_msg:
+                msg = custom_msg
+            else:
+                msg = self._vnc_notice(
+                    f"{self.store_name}: manual login needed",
+                    "Finish signing in in the browser.",
+                    timeout,
+                )
+            self.logger.info("Open %s to finish manually (waiting %ds).", cfg.vnc_url, timeout)
 
-        elapsed = 0
-        last_log = 0
-        while elapsed < timeout:
-            await asyncio.sleep(interval)
-            elapsed += interval
-            if await check_fn():
-                # You acted, so the next screen in this store gets the full wait again.
-                mark_answered(key)
-                return True
-            
-            if elapsed - last_log >= log_interval:
-                last_log = elapsed
-                remaining = timeout - elapsed
-                if remaining > 0:
-                    self.logger.info("Still waiting for login… %ds left.", remaining)
-        mark_unanswered(key)
-        return False
+            if cfg.notify_login_request and self.notify_enabled:
+                await notify(msg)
+
+            elapsed = 0
+            last_log = 0
+            while elapsed < timeout:
+                await asyncio.sleep(interval)
+                elapsed += interval
+                if await check_fn():
+                    mark_answered(key)
+                    return True
+
+                if elapsed - last_log >= log_interval:
+                    last_log = elapsed
+                    remaining = timeout - elapsed
+                    if remaining > 0:
+                        self.logger.info("Still waiting for login… %ds left.", remaining)
+            mark_unanswered(key)
+            return False
 
     async def _human_challenge_present(self) -> bool:
         """Return True when the current page is a Cloudflare / captcha human-check.

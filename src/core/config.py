@@ -47,6 +47,11 @@ def _int(key: str, default: int = 0) -> int:
         return default
 
 
+def _choice(key: str, choices: tuple[str, ...], default: str) -> str:
+    value = os.getenv(key, default).strip().lower()
+    return value if value in choices else default
+
+
 # Aliases so NOTIFY_SKIP_STORES accepts the same names as the CLI/STORES.
 _STORE_ALIASES = {"ae": "aliexpress", "amazon": "prime", "gp": "gamerpower"}
 
@@ -64,10 +69,10 @@ def _skip_stores(key: str) -> set:
 # ----- Settings guard: a setting nobody reads, or a value that cannot mean what it says (issue #40) -----
 
 # The same scan tests/test_docs_env.py uses, with the helper captured so the expected type is known too.
-_SETTING_RE = re.compile(r'(os\.getenv|_bool|_int|_skip_stores|_secret)\(\s*"([A-Z_0-9]+)"')
+_SETTING_RE = re.compile(r'(os\.getenv|_bool|_int|_choice|_skip_stores|_secret)\(\s*"([A-Z_0-9]+)"')
 _ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$", re.M)
-_KIND_BY_HELPER = {"_bool": "bool", "_int": "int", "_skip_stores": "str", "os.getenv": "str",
-                   "_secret": "str"}
+_KIND_BY_HELPER = {"_bool": "bool", "_int": "int", "_choice": "str", "_skip_stores": "str",
+                   "os.getenv": "str", "_secret": "str"}
 _TRUTHY = ("1", "true", "yes")
 _FALSY = ("", "0", "false", "no")
 # Anything that must never reach a log someone pastes into a bug report.
@@ -156,6 +161,8 @@ def settings_warnings() -> list:
             out.append(f"{name}={mask_value(name, value)} is not a yes/no value, so it reads as false.")
         elif kinds.get(name) == "int" and value and not _looks_int(value):
             out.append(f"{name}={mask_value(name, value)} is not a number, so the default is used.")
+        elif name == "VNC_MODE" and value.lower() not in ("on", "auto", "off"):
+            out.append(f"VNC_MODE={mask_value(name, value)} is invalid; use on, auto, or off.")
     return out
 
 
@@ -176,6 +183,8 @@ class Config:
     height: int = _int("HEIGHT", 720)
     timeout: int = _int("TIMEOUT", 60) * 1000          # ms
     vnc_login_timeout: int = _int("VNC_LOGIN_TIMEOUT", 180) # seconds
+    vnc_mode: str = _choice("VNC_MODE", ("on", "auto", "off"), "on")
+    vnc_idle_timeout: int = max(0, _int("VNC_IDLE_TIMEOUT", 60))
     novnc_port: str = os.getenv("NOVNC_PORT", "7080")
     vnc_ip: str = os.getenv("VNC_IP", "localhost")
     # Full public noVNC address for reverse proxies; replaces VNC_IP and NOVNC_PORT in links.

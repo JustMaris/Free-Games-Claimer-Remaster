@@ -31,17 +31,8 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Ti
         # dos2unix fixes Windows line endings; tini is a proper init process for Docker
         dos2unix tini \
     && mkdir -p /etc/apt/keyrings \
-    # ── Install TurboVNC & VirtualGL (virtual display system) ──
-    # These let Chrome render pages even without a real monitor
-    && curl --proto "=https" --tlsv1.2 -fsSL https://packagecloud.io/dcommander/virtualgl/gpgkey | gpg --dearmor -o /etc/apt/trusted.gpg.d/VirtualGL.gpg \
-    && curl --proto "=https" --tlsv1.2 -fsSL https://packagecloud.io/dcommander/turbovnc/gpgkey | gpg --dearmor -o /etc/apt/trusted.gpg.d/TurboVNC.gpg \
-    && curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/VirtualGL/repo/main/VirtualGL.list > /etc/apt/sources.list.d/VirtualGL.list \
-    && curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list > /etc/apt/sources.list.d/TurboVNC.list \
-    && apt-get update \
     && apt-get install --no-install-recommends -y \
-        # VirtualGL + TurboVNC = virtual display; ratpoison = lightweight window manager
-        virtualgl turbovnc ratpoison \
-        # noVNC + websockify = VNC viewer accessible through a web browser
+        xvfb x11vnc x11-utils \
         novnc websockify \
     # ── Shared libraries required by Chrome/Chromium ──
     && apt-get install -y --no-install-recommends \
@@ -111,6 +102,8 @@ ENV NOW=${NOW}
 # ── VNC settings (remote desktop access via web browser) ──
 ENV VNC_PORT=5900
 ENV NOVNC_PORT=7080
+ENV VNC_MODE=on
+ENV VNC_IDLE_TIMEOUT=60
 EXPOSE 7080
 
 # ── Display settings (virtual screen resolution for the browser) ──
