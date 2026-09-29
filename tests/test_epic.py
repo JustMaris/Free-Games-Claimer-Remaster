@@ -4,11 +4,12 @@ Walking Epic's checkout only proves what that page displayed, so a claim counts
 only once the product page itself reports the game as owned.
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from src.stores.epic import PAGE_STATE_JS, is_owned
+from src.stores.epic import CHECKOUT_ACTIONS_JS, EpicGamesClaimer, PAGE_STATE_JS, is_owned
 
 
 class TestOwnedState:
@@ -48,6 +49,45 @@ class TestPageStateOrder:
         assert PAGE_STATE_JS.strip().startswith("JSON.stringify(")
 
 
+class TestCheckoutPolling:
+    def test_one_main_dom_read_collects_all_loop_signals(self):
+        assert "return { add, accept }" in CHECKOUT_ACTIONS_JS
+        assert CHECKOUT_ACTIONS_JS.count("querySelectorAll('button')") == 1
+
+    def test_checkout_action_reader_handles_json_and_bad_results(self):
+        claimer = EpicGamesClaimer()
+
+        class Page:
+            def __init__(self, result):
+                self.result = result
+
+            async def evaluate(self, script):
+                assert script == CHECKOUT_ACTIONS_JS
+                return self.result
+
+        claimer.page = Page('{"add":true,"accept":false}')
+        assert asyncio.run(claimer._checkout_actions()) == {"add": True, "accept": False}
+        claimer.page = Page("not json")
+        assert asyncio.run(claimer._checkout_actions()) == {}
+
+    def test_new_checkout_loop_uses_one_combined_reader(self):
+        source = Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py"
+        block = source.read_text(encoding="utf-8").split("for attempt in range(25):", 1)[1]
+        block = block.split("if not add_clicked:", 1)[0]
+        assert block.count("_checkout_actions()") == 1
+        assert "page.evaluate" not in block
+
+
+class TestPromotionDeduplication:
+    def test_promotion_urls_use_constant_time_membership(self):
+        source = Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py"
+        block = source.read_text(encoding="utf-8").split("async def _detect_free_games_api", 1)[1]
+        block = block.split("@staticmethod", 1)[0]
+        assert "seen_urls: set[str] = set()" in block
+        assert "url not in seen_urls" in block
+        assert "any(g[\"url\"] == url" not in block
+
+
 class TestClaimHonesty:
     """Mobile games were reported as claimed on the strength of the checkout page alone."""
 
@@ -63,9 +103,9 @@ class TestClaimHonesty:
     def test_an_unconfirmed_claim_is_reported_as_such(self):
         assert "failed:unconfirmed" in self.BLOCK
 
-    def test_the_early_success_check_ignores_the_offer_text(self):
+    def test_success_checks_ignore_the_offer_text(self):
         checkout = self.SOURCE.split("async def _handle_new_checkout", 1)[1]
-        assert "add it to your library" in checkout.split("already_done = await", 1)[1][:800]
+        assert "add it to your library" in checkout
 
 
 class TestTheCodeScreenIsNotAbandoned:

@@ -10,6 +10,7 @@ Store-specific credentials (like EG_EMAIL) take priority over default ones (EMAI
 
 import os
 import re
+from functools import cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -91,6 +92,7 @@ _DEPRECATED = {
 }
 
 
+@cache
 def env_setting_kinds() -> dict:
     """Every setting this file reads, mapped to the kind of value it expects."""
     try:
@@ -100,6 +102,7 @@ def env_setting_kinds() -> dict:
     return {name: _KIND_BY_HELPER[helper] for helper, name in _SETTING_RE.findall(source)}
 
 
+@cache
 def known_env_names() -> set:
     """Settings the bot reads, plus the Docker-only ones, which live in .env.example."""
     names = set(env_setting_kinds()) | set(_DEPRECATED)
@@ -187,6 +190,7 @@ class Config:
     vnc_idle_timeout: int = max(0, _int("VNC_IDLE_TIMEOUT", 60))
     novnc_port: str = os.getenv("NOVNC_PORT", "7080")
     vnc_ip: str = os.getenv("VNC_IP", "localhost")
+    browser_executable: str | None = os.getenv("BROWSER_EXECUTABLE")
     # Full public noVNC address for reverse proxies; replaces VNC_IP and NOVNC_PORT in links.
     vnc_url_base: str | None = os.getenv("VNC_URL")
 

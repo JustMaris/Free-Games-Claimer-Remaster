@@ -24,8 +24,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99fgc-net \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        # Core tools: curl for downloads, ca-certificates for HTTPS, gnupg for GPG keys
-        curl ca-certificates gnupg \
+        # Core tools: curl for downloads and ca-certificates for HTTPS
+        curl ca-certificates \
         # Python and pip (the bot is written in Python)
         python3 python3-pip \
         # dos2unix fixes Windows line endings; tini is a proper init process for Docker
@@ -40,16 +40,8 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Ti
         libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
         libgbm1 libpango-1.0-0 libcairo2 libasound2 \
         libxfixes3 libxdamage1 \
-    # ── Install browser: Google Chrome on x86/x64, Chromium on ARM (Raspberry Pi) ──
-    && ARCH=$(dpkg --print-architecture) \
-    && if [ "$ARCH" = "amd64" ]; then \
-           curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
-           && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-           && apt-get update \
-           && apt-get install --no-install-recommends -y google-chrome-stable; \
-       else \
-           apt-get install --no-install-recommends -y chromium; \
-       fi \
+    # ── Install Chromium from Debian on every architecture ──
+    && apt-get install --no-install-recommends -y chromium \
     # Neutralise xdg-open (installed as a hard dependency of Chrome): make it a
     # silent no-op so Chrome's external-protocol handler for app schemes
     # (aliexpress://, intent://, alipay://, …) can never pop the blocking
@@ -66,7 +58,6 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Ti
     && printf '%s\n' '{"AutoLaunchProtocolsFromOrigins":[{"protocol":"aliexpress","allowed_origins":["*"]},{"protocol":"aliexpresshd","allowed_origins":["*"]},{"protocol":"aecmd","allowed_origins":["*"]},{"protocol":"alibaba","allowed_origins":["*"]},{"protocol":"alipay","allowed_origins":["*"]},{"protocol":"alipays","allowed_origins":["*"]},{"protocol":"tmall","allowed_origins":["*"]},{"protocol":"taobao","allowed_origins":["*"]},{"protocol":"market","allowed_origins":["*"]},{"protocol":"intent","allowed_origins":["*"]}]}' \
        | tee /etc/opt/chrome/policies/managed/fgc-autolaunch.json /etc/chromium/policies/managed/fgc-autolaunch.json > /dev/null \
     # Clean up package manager cache to reduce image size
-    && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/* /var/tmp/* /tmp/* /usr/share/doc/* \
@@ -78,7 +69,7 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Ti
 # Set the working directory inside the container
 WORKDIR /fgc
 
-# ── Install Python libraries (like nodriver, sqlalchemy, etc.) ──
+# ── Install Python libraries (like playwright, sqlalchemy, etc.) ──
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
@@ -112,9 +103,8 @@ ENV HEIGHT=720
 ENV DEPTH=24
 ENV SHOW=1
 
-# ── Health check: Docker uses this to know if the container is still working ──
-# It checks that python3 is running AND that the noVNC web server is responding
-HEALTHCHECK --interval=10s --timeout=5s CMD pgrep python3 && curl --fail http://localhost:7080 || exit 1
+# ── Health check: Docker uses this to know if the application is still running ──
+HEALTHCHECK --interval=10s --timeout=5s CMD pgrep python3 || exit 1
 
 # ── Container startup: run the entrypoint script first, then start the bot ──
 ENTRYPOINT ["docker-entrypoint.sh"]

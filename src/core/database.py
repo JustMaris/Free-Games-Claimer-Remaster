@@ -11,7 +11,7 @@ any redemption codes, and timestamps.
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Text, func
+from sqlalchemy import String, DateTime, Text, Index, func, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -44,6 +44,7 @@ class ClaimedGame(Base):
     """
 
     __tablename__ = "claimed_games"
+    __table_args__ = (Index("ix_claimed_games_identity", "store", "user", "game_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     store: Mapped[str] = mapped_column(String(32), index=True, comment="epic, gog, prime, steam")
@@ -73,6 +74,10 @@ async def init_db() -> None:
     """Create all tables if they don't exist yet."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_claimed_games_identity "
+            "ON claimed_games (store, user, game_id)"
+        ))
     logger.debug("Database ready: %s", cfg.database_url)
 
 

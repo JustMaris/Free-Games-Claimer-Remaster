@@ -60,7 +60,8 @@ async def send_discord(
             data = {"content": chunk, "username": username}
             # Attach the screenshot only to the first chunk
             if i == 0 and screenshot_path and screenshot_path.exists():
-                files = {"file": (screenshot_path.name, screenshot_path.read_bytes(), "image/png")}
+                image = await asyncio.to_thread(screenshot_path.read_bytes)
+                files = {"file": (screenshot_path.name, image, "image/png")}
                 resp = await client.post(webhook_url, data=data, files=files)
             else:
                 resp = await client.post(webhook_url, json=data)

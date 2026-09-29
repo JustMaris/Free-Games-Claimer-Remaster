@@ -83,7 +83,7 @@ logger = logging.getLogger("fgc")
 # Libraries that would otherwise bury our own diagnostics: every CDP frame, every
 # HTTP handshake, every SQLite call. DEBUG=true is about the bot, DEBUG_LIBS about these.
 NOISY_LIBRARIES = (
-    "nodriver", "uc", "websockets", "httpx", "httpcore",
+    "playwright", "websockets", "httpx", "httpcore",
     "aiosqlite", "sqlalchemy", "apscheduler", "tzlocal", "asyncio", "apprise",
 )
 if not cfg.debug_libs:
@@ -510,6 +510,8 @@ async def main() -> None:
     _warn_about_settings()
     await init_db()
     logger.info("Database ready.")
+    from src.core.vnc import vnc_manager
+    await vnc_manager.initialize()
 
     if cfg.reset_db_games:
         try:
@@ -615,6 +617,8 @@ async def main() -> None:
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down…")
         scheduler.shutdown(wait=False)
+    finally:
+        await vnc_manager.close()
 
 
 if __name__ == "__main__":

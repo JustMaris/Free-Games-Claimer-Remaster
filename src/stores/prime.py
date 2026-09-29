@@ -6,7 +6,6 @@ import json
 from datetime import datetime, timezone
 import logging
 
-import nodriver as uc
 import pyotp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -84,29 +83,27 @@ class PrimeGamingClaimer(BaseClaimer):
 
             # Force the password path: kill WebAuthn + Amazon's passkey/mshop sign-in forms.
             try:
-                await self.page.send(
-                    uc.cdp.page.add_script_to_evaluate_on_new_document(
-                        source="""
-                            try { Object.defineProperty(window, 'PublicKeyCredential', { configurable: true, get: () => undefined }); } catch (e) {}
+                await self.browser.context.add_init_script(
+                    """
+                        try { Object.defineProperty(window, 'PublicKeyCredential', { configurable: true, get: () => undefined }); } catch (e) {}
+                        try {
+                            const noop = () => new Promise(() => {});  // never resolves, so no passkey error
+                            if (navigator.credentials) { navigator.credentials.get = noop; navigator.credentials.create = noop; }
+                        } catch (e) {}
+                        (function () {
+                            // Remove the wrong sign-in forms; leave only form[name="signIn"] (password).
+                            const KILL = ['form[name="signInWithPasskeyButton"]', 'form[name="signInWithMShopButton"]', '#auth-signin-via-passkey-section', '#auth-signin-via-passkey-btn'];
+                            const sweep = () => { try {
+                                KILL.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
+                                document.querySelectorAll('[data-action="SIGNIN_PASSKEY_COLLECT"]').forEach(el => el.removeAttribute('data-action'));
+                            } catch (e) {} };
                             try {
-                                const noop = () => new Promise(() => {});  // never resolves, so no passkey error
-                                if (navigator.credentials) { navigator.credentials.get = noop; navigator.credentials.create = noop; }
+                                sweep();
+                                document.addEventListener('DOMContentLoaded', sweep);
+                                new MutationObserver(sweep).observe(document, { childList: true, subtree: true });
                             } catch (e) {}
-                            (function () {
-                                // Remove the wrong sign-in forms; leave only form[name="signIn"] (password).
-                                const KILL = ['form[name="signInWithPasskeyButton"]', 'form[name="signInWithMShopButton"]', '#auth-signin-via-passkey-section', '#auth-signin-via-passkey-btn'];
-                                const sweep = () => { try {
-                                    KILL.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
-                                    document.querySelectorAll('[data-action="SIGNIN_PASSKEY_COLLECT"]').forEach(el => el.removeAttribute('data-action'));
-                                } catch (e) {} };
-                                try {
-                                    sweep();
-                                    document.addEventListener('DOMContentLoaded', sweep);
-                                    new MutationObserver(sweep).observe(document, { childList: true, subtree: true });
-                                } catch (e) {}
-                            })();
-                        """
-                    )
+                        })();
+                    """
                 )
             except Exception as e:
                 self.logger.debug("Passkey neutralization script injection exception: %s", e)
@@ -592,29 +589,21 @@ class PrimeGamingClaimer(BaseClaimer):
     # ------------------------------------------------------------------
 
     async def _ensure_page_alive(self) -> None:
-        """Check if the CDP tab/session is still responsive. If not, recover it.
-
-        After login (especially VNC manual login), the browser may open a new tab
-        or the original tab's CDP session may become invalid. This method detects
-        that and re-attaches to a working tab so navigation doesn't crash.
-        """
+        """Check if the page is still responsive. If not, recover it."""
         try:
-            # Quick health check: try to read the current URL
             await self.page.evaluate("window.location.href")
         except Exception:
-            logger.warning("CDP session lost, attempting to recover...")
+            logger.warning("Page lost, attempting to recover...")
             try:
-                # Get all open tabs from the browser and pick the first valid one
-                tabs = self.browser.tabs
-                if tabs:
-                    self.page = tabs[0]
-                    logger.debug("Recovered CDP session on tab: %s", self.page.target.url)
+                pages = self.browser.tabs
+                if pages:
+                    self.page = pages[0]
+                    logger.debug("Recovered page: %s", self.page.url)
                 else:
-                    # No tabs at all, open a fresh one (browser.get() alone would raise here, issue #38)
                     self.page = await open_first_tab(self.browser)
-                    logger.debug("Opened new tab after session loss.")
+                    logger.debug("Opened new page after session loss.")
             except Exception:
-                logger.exception("Session recovery failed, opening fresh tab.")
+                logger.exception("Page recovery failed, opening fresh page.")
                 self.page = await open_first_tab(self.browser)
 
     # ------------------------------------------------------------------
@@ -624,8 +613,7 @@ class PrimeGamingClaimer(BaseClaimer):
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=3, max=15), reraise=True)
     async def _claim_internal_games(self) -> None:
         """Navigate to the games tab, load all, show stats, and claim."""
-        # Ensure the CDP session is still alive before navigating
-        # (login flow or VNC interaction may have invalidated the tab reference)
+        # Login or VNC interaction may have invalidated the page reference.
         await self._ensure_page_alive()
 
         await self.page.get(URL_CLAIM)
@@ -658,8 +646,6 @@ class PrimeGamingClaimer(BaseClaimer):
         await self._scroll_until_stable()
 
         # --- DOM diagnostics (helps debug zero-game issues) ---
-        # NOTE: nodriver's evaluate() returns JS objects as Python lists,
-        # NOT dicts. We must JSON.stringify() in JS and json.loads() in Python.
         import json
 
         diag_raw = await self.page.evaluate(

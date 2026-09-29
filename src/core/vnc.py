@@ -27,7 +27,7 @@ class VNCManager:
         async with self._lock:
             if self._running():
                 return
-            self._stop_processes()
+            await asyncio.to_thread(self._stop_processes)
             auth = ["-rfbauth", "/tmp/x11vnc.pass"] if os.path.exists("/tmp/x11vnc.pass") else ["-nopw"]
             self._x11vnc = subprocess.Popen([
                 "x11vnc", "-display", os.getenv("DISPLAY", ":1"), "-forever", "-shared",
@@ -42,7 +42,7 @@ class VNCManager:
 
     async def stop(self) -> None:
         async with self._lock:
-            self._stop_processes()
+            await asyncio.to_thread(self._stop_processes)
 
     async def initialize(self) -> None:
         if cfg.vnc_mode == "on":
@@ -92,7 +92,7 @@ class VNCManager:
                     return
             except OSError:
                 await asyncio.sleep(0.05)
-        self._stop_processes()
+        await asyncio.to_thread(self._stop_processes)
         raise RuntimeError(f"VNC service did not open port {port}")
 
     def _stop_processes(self) -> None:

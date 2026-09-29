@@ -140,6 +140,9 @@ Options are set via environment variables in `.env`:
 | `RUN_ON_STARTUP` | `true` | Run once immediately when the container/application starts. |
 | `VNC_LOGIN_TIMEOUT`| `180` | Seconds the bot waits for **you** at any manual step: signing in, a code from e-mail or SMS, approving 2FA, a captcha, or Unity's checkout form. A window nobody answers ends that one store's manual steps for the rest of the run, and the summary says what it skipped. Raise it if you are not usually sitting at the computer. |
 | `TIMEOUT` | `60` | Advanced: seconds to wait for a page element before giving up. |
+| `VNC_MODE` | `on` | Whether to expose noVNC: `on` = always, `auto` = only when a manual step is needed (stops after `VNC_IDLE_TIMEOUT`), `off` = never. |
+| `VNC_IDLE_TIMEOUT` | `60` | Seconds to keep VNC running after the manual step is completed (only with `VNC_MODE=auto`). |
+| `BROWSER_EXECUTABLE` | | Path to the Chromium executable. Leave blank to use the system default. |
 | `EMAIL` | | Default login email used by ALL stores unless a store-specific `*_EMAIL` overrides it. |
 | `PASSWORD` | | Default login password used by ALL stores unless a store-specific `*_PASSWORD` overrides it. |
 | `EG_EMAIL` | | Epic Games login email. |
@@ -361,8 +364,10 @@ free-games-claimer-remaster/
 ├── src/
 │   ├── version.py          # Version string
 │   ├── core/               # Shared engine components
+│   │   ├── browser.py      # Playwright compatibility adapters
 │   │   ├── claimer.py      # BaseClaimer: browser launch, login waits, notifications
 │   │   ├── config.py       # Typed configuration loader (.env → Python)
+│   │   ├── vnc.py          # On-demand VNC manager
 │   │   ├── database.py     # SQLAlchemy models & SQLite engine
 │   │   ├── notifier.py     # Modular Discord/Apprise webhooks
 │   │   ├── selection.py    # Which stores this run covers (GamerPower reads it)
@@ -388,14 +393,13 @@ free-games-claimer-remaster/
 1. **Scheduler** (`main.py`) supports recurring interval timers (`SCHEDULER_HOURS`), fixed daily
 drop windows (`SCHEDULER_FIXED_TIMES`), combined execution, and initial startup checks
 (`RUN_ON_STARTUP`).
-2. Each store module **starts its own browser** with an isolated profile, securely recalling session
-cookies (`--restore-last-session`). A first tab that arrives late no longer takes the store down,
-and each profile is marked as cleanly closed before every start. Two exceptions save a login: Fab
+2. Each store module **starts its own browser** with an isolated persistent profile, securely recalling
+cookies. Each profile is marked as cleanly closed before every start. Two exceptions save a login: Fab
 rides Epic's profile, and a GamerPower find is claimed inside the session the store already opened,
 rather than in a second browser of its own.
 3. **Login detection** checks the page DOM (not just cookies/DB).
-4. **Fingerprint** is the one nodriver's patched Chrome produces by itself, because a hand-written
-desktop spoof did not match the real container and started summoning captchas (see CHANGELOG 1.4).
+4. **Fingerprint** uses the container's native Chromium values, because a hand-written desktop spoof
+did not match the real container and started summoning captchas (see CHANGELOG 1.4).
 Only AliExpress overrides it, injecting one coherent real-device Android fingerprint
 (`browserforge`) over the Chrome DevTools Protocol.
 5. **Game discovery** prefers each store's own data over scraping the page: Epic's promotions API,

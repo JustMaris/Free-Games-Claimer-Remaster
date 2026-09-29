@@ -8,7 +8,6 @@ import re
 from datetime import datetime, timezone
 
 import httpx
-import nodriver as uc
 import pyotp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -71,6 +70,20 @@ JSON.stringify((() => {
     }
 
     return { text: '', flow: 'unknown' };
+})())
+"""
+
+CHECKOUT_ACTIONS_JS = r"""
+JSON.stringify((() => {
+    let add = false;
+    let accept = false;
+    for (const btn of document.querySelectorAll('button')) {
+        const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        add ||= text.includes('add to library');
+        accept ||= text.includes('i accept') || text.includes('i agree');
+        if (add && accept) break;
+    }
+    return { add, accept };
 })())
 """
 
@@ -551,7 +564,7 @@ class EpicGamesClaimer(BaseClaimer):
     async def _do_stealth_login(self) -> None:
         """Fill in email and password using browser-native methods.
         
-        Uses real keyboard input (CDP events) instead of JavaScript injection,
+        Uses real keyboard input instead of JavaScript injection,
         which makes the login look more human-like to anti-bot systems.
         """
         email = cfg.eg_email.strip() if cfg.eg_email else ""
@@ -685,6 +698,7 @@ class EpicGamesClaimer(BaseClaimer):
             elements = data.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", [])
             now = datetime.now(timezone.utc)
             free_games: list[dict] = []
+            seen_urls: set[str] = set()
 
             for el in elements:
                 # Must have active promotionalOffers (not just upcoming)
@@ -712,13 +726,18 @@ class EpicGamesClaimer(BaseClaimer):
                             except (ValueError, TypeError):
                                 # If dates are unparseable, trust the discount
                                 is_free_now = True
+                            if is_free_now:
+                                break
+                    if is_free_now:
+                        break
 
                 if not is_free_now:
                     continue
 
                 # Build the store URL from available slug fields
                 url = self._build_game_url(el)
-                if url and not any(g["url"] == url for g in free_games):
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
                     title = el.get("title", "Unknown")
                     free_games.append({"url": url, "title": title})
 
@@ -826,6 +845,13 @@ class EpicGamesClaimer(BaseClaimer):
                 break
             await self.sleep(1)
         return state
+
+    async def _checkout_actions(self) -> dict:
+        raw = await self.page.evaluate(CHECKOUT_ACTIONS_JS)
+        try:
+            return json.loads(raw) if isinstance(raw, str) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
     async def _confirm_in_library(self, url: str, tries: int = 3) -> bool:
         """Re-read the product page after checkout, only an owned page proves the claim landed."""
@@ -1001,13 +1027,12 @@ class EpicGamesClaimer(BaseClaimer):
           new_get: "Get" button on product page → Continue dialog → checkout
                    overlay with "Add to library" → click it.
 
-        Uses CDP Input.dispatchMouseEvent for all clicks to bypass React
-        synthetic event handling.
+        Uses Playwright mouse clicks to bypass React synthetic event handling.
         """
         try:
             # ── Step 1: Click the initial button ("Get" or "Add to library") ──
             initial_btn = "add to library" if flow_type == "new_add" else "get"
-            clicked = await self._cdp_click_element_by_text(initial_btn, timeout=5)
+            clicked = await self._mouse_click_element_by_text(initial_btn, timeout=5)
 
             if not clicked:
                 logger.warning("Could not find '%s' button for '%s'.", initial_btn, title)
@@ -1057,7 +1082,7 @@ class EpicGamesClaimer(BaseClaimer):
 
             # ── Step 2: Handle intermediate dialogs ──
             # "Device not supported" → Continue
-            cont_clicked = await self._cdp_click_element_by_text("continue", timeout=5)
+            cont_clicked = await self._mouse_click_element_by_text("continue", timeout=5)
             if cont_clicked:
                 logger.debug("Clicked 'Continue' dialog. Waiting for checkout overlay...")
                 # The checkout overlay takes several seconds to load after Continue
@@ -1075,8 +1100,8 @@ class EpicGamesClaimer(BaseClaimer):
                 })()
                 """
             )
-            await self._cdp_click_element_by_text("accept", timeout=1)
-            await self._cdp_click_element_by_text("i agree", timeout=1)
+            await self._mouse_click_element_by_text("accept", timeout=1)
+            await self._mouse_click_element_by_text("i agree", timeout=1)
 
             # ── Step 3: If we clicked "Get", wait for checkout overlay ──
             if flow_type == "new_get":
@@ -1085,54 +1110,26 @@ class EpicGamesClaimer(BaseClaimer):
                 accepted = False
                 
                 for attempt in range(25):
-                    # Check main page for Add to Library
-                    without_cdp = await self.page.evaluate("""
-                        (() => {
-                            const btns = [...document.querySelectorAll('button')];
-                            const btn = btns.find(b => {
-                                const t = (b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-                                return t.includes('add to library');
-                            });
-                            return btn ? true : false;
-                        })()
-                    """)
-                    
-                    if without_cdp and not add_clicked:
-                        logger.debug("Found 'Add to library' button. Clicking via CDP...")
+                    actions = await self._checkout_actions()
+
+                    if actions.get("add") and not add_clicked:
+                        logger.debug("Found 'Add to library' button. Clicking via Playwright mouse...")
                         await self.sleep(1)
-                        add_clicked = await self._cdp_click_element_by_text("add to library", timeout=2)
+                        add_clicked = await self._mouse_click_element_by_text("add to library", timeout=2)
                         await self.sleep(2)
-                    
-                    # Search for 'I accept' on main page
-                    needs_accept = await self.page.evaluate("""
-                        (() => {
-                            const btns = [...document.querySelectorAll('button')];
-                            const btn = btns.find(b => {
-                                const t = (b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-                                return t.includes('i accept') || t.includes('i agree');
-                            });
-                            return btn ? true : false;
-                        })()
-                    """)
-                    if needs_accept and not accepted:
+
+                    if actions.get("accept") and not accepted:
                         logger.debug("Found 'I accept' (Right of Withdrawal) on main page. Clicking...")
-                        accepted = await self._cdp_click_element_by_text("accept", timeout=2)
+                        accepted = await self._mouse_click_element_by_text("accept", timeout=2)
                         await self.sleep(2)
 
                     # Also check inside the iframe for 'I accept' or 'Place Order' (just in case)
-                    frame_tree = await self.page.send(uc.cdp.page.get_frame_tree())
-                    iframe_frame_id = self._find_purchase_frame(frame_tree)
-                    
-                    if iframe_frame_id:
-                        ctx_id = await self.page.send(
-                            uc.cdp.page.create_isolated_world(
-                                frame_id=iframe_frame_id,
-                                grant_univeral_access=True,
-                            )
-                        )
+                    iframe = self._find_purchase_frame()
+
+                    if iframe:
                         # Check "Add to library" inside iframe
                         if not add_clicked:
-                            did_add = await self._eval_in_frame(ctx_id, """
+                            did_add = await self._eval_in_frame(iframe, """
                                 (() => {
                                     const btns = [...document.querySelectorAll('button')];
                                     const btn = btns.find(b => {
@@ -1150,7 +1147,7 @@ class EpicGamesClaimer(BaseClaimer):
 
                         # Check "I accept" inside iframe
                         if not accepted:
-                            did_accept = await self._eval_in_frame(ctx_id, """
+                            did_accept = await self._eval_in_frame(iframe, """
                                 (() => {
                                     const btns = [...document.querySelectorAll('button')];
                                     const btn = btns.find(b => {
@@ -1171,7 +1168,6 @@ class EpicGamesClaimer(BaseClaimer):
                         # We don't break immediately, let already_done or the timeout push us forward
                         pass
 
-                    # Also check if it was already confirmed (fallback checking main page)
                     already_done = await self.page.evaluate(
                         """
                         (() => {
@@ -1194,7 +1190,7 @@ class EpicGamesClaimer(BaseClaimer):
                     await self.take_screenshot(f"epic_no_addlib_{title[:20]}")
                     
                     # Last resort: try Continue in case another dialog appeared
-                    await self._cdp_click_element_by_text("continue", timeout=3)
+                    await self._mouse_click_element_by_text("continue", timeout=3)
                     await self.sleep(3)
 
                 await self.sleep(3)
@@ -1243,17 +1239,10 @@ class EpicGamesClaimer(BaseClaimer):
             logger.exception("Error in new checkout flow for '%s'.", title)
             return False
 
-    async def _cdp_click_element_by_text(
+    async def _mouse_click_element_by_text(
         self, text: str, *, tag: str = "button", timeout: int = 1
     ) -> bool:
-        """Click an element using CDP Input.dispatchMouseEvent (real mouse click).
-
-        This is the most reliable click method, it sends actual browser-level
-        mouse input at the element's pixel coordinates, bypassing all
-        JavaScript event handling (including React synthetic events).
-
-        Sends: mouseMoved → mousePressed → mouseReleased (like a real human).
-        """
+        """Click an element using Playwright's browser-level mouse input."""
         import asyncio
 
         for attempt in range(max(1, timeout)):
@@ -1323,60 +1312,29 @@ class EpicGamesClaimer(BaseClaimer):
             x, y = coords["x"], coords["y"]
             logger.debug("Found '%s' at (%.0f, %.0f) size %.0fx%.0f", text, x, y, coords.get("w", 0), coords.get("h", 0))
 
-            # Step 2: Send CDP mouse events (mouseMoved → mousePressed → mouseReleased)
             try:
-                # First move the mouse to the target (required for proper event routing)
-                await self.page.send(
-                    uc.cdp.input_.dispatch_mouse_event(
-                        type_="mouseMoved",
-                        x=x,
-                        y=y,
-                    )
-                )
+                await self.page._page.mouse.move(x, y)
                 await asyncio.sleep(0.05)
-
-                # Press
-                await self.page.send(
-                    uc.cdp.input_.dispatch_mouse_event(
-                        type_="mousePressed",
-                        x=x,
-                        y=y,
-                        button=uc.cdp.input_.MouseButton("left"),
-                        click_count=1,
-                    )
-                )
+                await self.page._page.mouse.down()
                 await asyncio.sleep(0.1)
-
-                # Release
-                await self.page.send(
-                    uc.cdp.input_.dispatch_mouse_event(
-                        type_="mouseReleased",
-                        x=x,
-                        y=y,
-                        button=uc.cdp.input_.MouseButton("left"),
-                        click_count=1,
-                    )
-                )
-                logger.debug("CDP click OK at (%.0f, %.0f) for '%s'.", x, y, text)
+                await self.page._page.mouse.up()
+                logger.debug("Playwright mouse click OK at (%.0f, %.0f) for '%s'.", x, y, text)
                 return True
             except Exception as exc:
-                logger.warning("CDP click failed for '%s': %s", text, exc)
+                logger.warning("Playwright mouse click failed for '%s': %s", text, exc)
                 await self.sleep(1)
 
         return False
 
     # ------------------------------------------------------------------
-    # Purchase iframe handling (via CDP), OLD flow
+    # Purchase iframe handling, OLD flow
     # ------------------------------------------------------------------
 
     async def _handle_purchase_iframe(self, title: str) -> bool:
         """Complete the purchase inside Epic's payment iframe.
 
         Epic's checkout is inside a cross-origin iframe (payment-store.epicgames.com).
-        Normal JavaScript can't reach inside cross-origin iframes, so we use CDP:
-          1. Find the iframe's unique FrameId from the browser's frame tree
-          2. Create an isolated JavaScript execution context inside that frame
-          3. Run our button-clicking scripts inside that context
+        Playwright evaluates directly in that frame.
         """
         try:
             # Wait for the iframe to appear on the main page
@@ -1393,27 +1351,13 @@ class EpicGamesClaimer(BaseClaimer):
 
             await self.sleep(2)  # let iframe content load
 
-            # Find the iframe's FrameId in the frame tree
-            frame_tree = await self.page.send(uc.cdp.page.get_frame_tree())
-            iframe_frame_id = self._find_purchase_frame(frame_tree)
-            if not iframe_frame_id:
-                logger.warning("Could not locate purchase frame in tree for '%s'", title)
+            iframe = self._find_purchase_frame()
+            if not iframe:
+                logger.warning("Could not locate purchase frame for '%s'", title)
                 return False
 
-            # Step 2: Create an isolated JavaScript context inside the iframe
-            # This gives us the ability to run code inside the payment frame
-            ctx_id = await self.page.send(
-                uc.cdp.page.create_isolated_world(
-                    frame_id=iframe_frame_id,
-                    grant_univeral_access=True,
-                )
-            )
-            logger.debug("Created isolated world in purchase iframe, ctx=%s", ctx_id)
-
-            text_content = await self._eval_in_frame(ctx_id, "document.body?.innerText || ''")
-
             # Check for "unavailable in your region" using innerText to ignore hidden script tags
-            unavailable = await self._eval_in_frame(ctx_id, """
+            unavailable = await self._eval_in_frame(iframe, """
                 document.body?.innerText?.toLowerCase()?.includes('unavailable in your region') || false
             """)
             if unavailable:
@@ -1422,13 +1366,13 @@ class EpicGamesClaimer(BaseClaimer):
 
             # Handle parental PIN if configured
             if cfg.eg_parentalpin:
-                has_pin = await self._eval_in_frame(ctx_id, """
+                has_pin = await self._eval_in_frame(iframe, """
                     !!document.querySelector('.payment-pin-code')
                 """)
                 if has_pin:
                     logger.debug("Entering parental PIN")
                     pin = cfg.eg_parentalpin
-                    await self._eval_in_frame(ctx_id, f"""
+                    await self._eval_in_frame(iframe, f"""
                         (() => {{
                             const input = document.querySelector('input.payment-pin-code__input');
                             if (input) {{
@@ -1445,7 +1389,7 @@ class EpicGamesClaimer(BaseClaimer):
 
             # Click "Place Order" (wait for it to not be in loading state)
             for attempt in range(8):
-                clicked = await self._eval_in_frame(ctx_id, """
+                clicked = await self._eval_in_frame(iframe, """
                     (() => {
                         const btns = [...document.querySelectorAll('button')];
                         const po = btns.find(b =>
@@ -1466,7 +1410,7 @@ class EpicGamesClaimer(BaseClaimer):
 
             # Handle "I Accept" / "I Agree" button (EU accounts only)
             # JS: const btnAgree = iframe.locator('button:has-text("I Accept")');
-            await self._eval_in_frame(ctx_id, """
+            await self._eval_in_frame(iframe, """
                 (() => {
                     const btns = [...document.querySelectorAll('button')];
                     const agree = btns.find(b =>
@@ -1513,36 +1457,19 @@ class EpicGamesClaimer(BaseClaimer):
             logger.exception("Error in purchase iframe handling for '%s'", title)
             return False
 
-    def _find_purchase_frame(self, frame_tree) -> str | None:
+    def _find_purchase_frame(self):
         """Search through all browser frames to find the payment/purchase iframe."""
-        if not hasattr(frame_tree, 'child_frames') or not frame_tree.child_frames:
-            return None
-        for child in frame_tree.child_frames:
-            url = child.frame.url or ""
-            if "payment" in url or "purchase" in url or "webPurchaseContainer" in url:
-                return child.frame.id_
-            found = self._find_purchase_frame(child)
-            if found:
-                return found
+        for frame in self.page._page.frames:
+            if frame != self.page._page.main_frame and any(
+                part in frame.url for part in ("payment", "purchase", "webPurchaseContainer")
+            ):
+                return frame
         return None
 
-    async def _eval_in_frame(self, context_id: int, expression: str):
-        """Evaluate JavaScript in a specific frame's isolated world via CDP."""
+    async def _eval_in_frame(self, frame, expression: str):
+        """Evaluate JavaScript in a specific Playwright frame."""
         try:
-            result = await self.page.send(
-                uc.cdp.runtime.evaluate(
-                    expression=expression,
-                    context_id=context_id,
-                    return_by_value=True,
-                )
-            )
-            # nodriver returns (RemoteObject, Optional[ExceptionDetails])
-            if isinstance(result, tuple):
-                remote_obj = result[0]
-                return remote_obj.value if remote_obj else None
-            if result and hasattr(result, 'value'):
-                return result.value
-            return None
+            return await frame.evaluate(expression)
         except Exception:
             logger.debug("eval_in_frame failed: %s...", expression[:60])
             return None
@@ -1552,9 +1479,7 @@ class EpicGamesClaimer(BaseClaimer):
     ) -> bool:
         """Find and click a button on the main page by its text content.
 
-        Uses page.evaluate() instead of nodriver's find() to avoid issues
-        with Playwright-style pseudo-selectors like :has-text() which nodriver
-        does not support.
+        Uses page.evaluate() to match button text directly.
         """
         for _ in range(max(1, timeout)):
             clicked = await self.page.evaluate(f"""

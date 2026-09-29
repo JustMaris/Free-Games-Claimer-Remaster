@@ -2,6 +2,7 @@
 set -eo pipefail
 
 BROWSER="${BROWSER_DIR:-data/browser}"
+mkdir -p /fgc/data
 rm -f "/fgc/$BROWSER/SingletonLock"
 rm -f /tmp/.X1-lock /tmp/.tX1-lock /tmp/.X11-unix/X1
 

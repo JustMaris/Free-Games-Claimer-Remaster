@@ -6,7 +6,6 @@ import json
 import logging
 import re
 
-import nodriver as uc
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.claimer import BaseClaimer, now_str, filenamify

@@ -103,6 +103,7 @@ class TestOneUnansweredPromptIsEnough:
 
         monkeypatch.setattr(claimer_module.asyncio, "sleep", _no_wait)
         monkeypatch.setattr("src.core.notifier.notify", lambda *a, **kw: _asyncio.sleep(0))
+        monkeypatch.setattr("src.core.vnc.vnc_manager.start", lambda: _asyncio.sleep(0))
         obj = claimer_module.BaseClaimer.__new__(claimer_module.BaseClaimer)
         obj.store_name = "itchio"
         obj.notified = sent
