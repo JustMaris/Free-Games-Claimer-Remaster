@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Free Games Claimer status</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:16px}
+    pre{background:#0b1020;color:#dbe7ff;padding:12px;border-radius:8px;overflow:auto}
+    .muted{color:#6b7a99}
+  </style>
+</head>
+<body>
+  <h1>Free Games Claimer status</h1>
+  <p class="muted">Powered by <code>/fgc/data/status.json</code></p>
+  <pre id="out">Loading…</pre>
+  <script>
+    async function tick(){
+      try{
+        const res = await fetch('status.json?ts='+Date.now(), {cache:'no-store'});
+        const j = await res.json();
+        document.getElementById('out').textContent = JSON.stringify(j, null, 2);
+      }catch(e){
+        document.getElementById('out').textContent = String(e);
+      }
+    }
+    tick();
+    setInterval(tick, 3000);
+  </script>
+</body>
+</html>

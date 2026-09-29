@@ -24,11 +24,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from datetime import datetime, timezone
 
 from src.core.config import cfg, settings_warnings
 from src.core.claimer import mask_account
 from src.core.database import init_db
 from src.core.run_state import reset_run_state, waiting_for_you
+from src.core.status import write_status_json, RunTiming
 from src.core.selection import apply_run_selection
 from src.core.updates import notify_if_update_available
 from src.stores.aliexpress import claim_aliexpress
@@ -351,8 +353,8 @@ def _print_banner() -> None:
 
 async def run_claimers() -> None:
     """Run selected claimers sequentially (they each open their own browser)."""
-    # Each run starts fresh: a store that was waiting for you hours ago gets another chance.
     reset_run_state()
+    run_started_at = datetime.now(timezone.utc)
     selected = _selected_stores()
     claimers = _get_active_claimers(selected)
     sides = [key for key in selected if key in SIDE_STORES]
@@ -374,6 +376,8 @@ async def run_claimers() -> None:
         routed = await discover_giveaways()
 
     aggregated_results = []
+
+    run_timing = RunTiming(last_run_started_at=run_started_at)
 
     for key, name, func in claimers:
         try:
@@ -480,6 +484,14 @@ async def run_claimers() -> None:
                 final_msg = "🛑 **DRY RUN SUMMARY: games remaining to be claimed**\n\n" + final_msg
             await notify(final_msg)
 
+    run_timing.last_run_finished_at = datetime.now(timezone.utc)
+    write_status_json(
+        vnc_mode=cfg.vnc_mode,
+        selected_stores=selected,
+        run_state="waiting_for_you" if waiting_for_you() else "idle",
+        run_timing=run_timing,
+    )
+
     logger.info("✔ Claiming run complete.")
 
 
@@ -512,6 +524,13 @@ async def main() -> None:
     logger.info("Database ready.")
     from src.core.vnc import vnc_manager
     await vnc_manager.initialize()
+
+    write_status_json(
+        vnc_mode=cfg.vnc_mode,
+        selected_stores=_selected_stores(),
+        run_state="waiting_for_you" if waiting_for_you() else "idle",
+        run_timing=RunTiming(),
+    )
 
     if cfg.reset_db_games:
         try:
@@ -548,6 +567,13 @@ async def main() -> None:
         await notify(test_msg)
         logger.info("✅ Test notification dispatched! Check your configured services. "
                      "Set NOTIFY_TEST=0 in your .env to disable this on future restarts.")
+
+    write_status_json(
+        vnc_mode=cfg.vnc_mode,
+        selected_stores=_selected_stores(),
+        run_state="waiting_for_you" if waiting_for_you() else "idle",
+        run_timing=RunTiming(),
+    )
 
     # If --once flag is set, run a single pass and exit
     if "--once" in sys.argv:
@@ -619,6 +645,8 @@ async def main() -> None:
         scheduler.shutdown(wait=False)
     finally:
         await vnc_manager.close()
+        from src.core.display import display_manager
+        await display_manager.close()
 
 
 if __name__ == "__main__":

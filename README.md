@@ -367,7 +367,9 @@ free-games-claimer-remaster/
 │   │   ├── browser.py      # Playwright compatibility adapters
 │   │   ├── claimer.py      # BaseClaimer: browser launch, login waits, notifications
 │   │   ├── config.py       # Typed configuration loader (.env → Python)
-│   │   ├── vnc.py          # On-demand VNC manager
+│   │   ├── display.py      # On-demand Xvfb manager
+│   │   ├── status.py       # Status JSON writer
+│   │   ├── vnc.py          # On-demand VNC and status server
 │   │   ├── database.py     # SQLAlchemy models & SQLite engine
 │   │   ├── notifier.py     # Modular Discord/Apprise webhooks
 │   │   ├── selection.py    # Which stores this run covers (GamerPower reads it)

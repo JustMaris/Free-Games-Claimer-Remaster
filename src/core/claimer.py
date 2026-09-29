@@ -31,6 +31,7 @@ import pyotp
 
 from src.core.browser import BrowserAdapter, Element, PageAdapter
 from src.core.config import cfg
+from src.core.display import display_manager
 from src.core.run_state import mark_answered, mark_unanswered, waits_for_nobody
 
 logger = logging.getLogger("fgc.claimer")
@@ -86,6 +87,7 @@ class BaseClaimer:
 
     def __init__(self) -> None:
         self._playwright = None
+        self._display_leased = False
         self.browser: BrowserAdapter | None = None
         self.page: PageAdapter | None = None
         self.user: str | None = None
@@ -280,6 +282,9 @@ class BaseClaimer:
         launch_error: Exception | None = None
         for attempt in range(1, 4):
             try:
+                if not headless and not self._display_leased:
+                    await display_manager.acquire()
+                    self._display_leased = True
                 self._playwright = await async_playwright().start()
                 context = await self._playwright.chromium.launch_persistent_context(
                     user_data_dir=str(store_browser_dir),
@@ -356,6 +361,9 @@ class BaseClaimer:
         self._playwright = None
         self.browser = None
         self.page = None
+        if getattr(self, "_display_leased", False):
+            await display_manager.release()
+            self._display_leased = False
 
     def _log_launch_diagnostics(self, profile_dir: Path, chrome_path: str | None) -> None:
         """Say what the machine looked like when Chrome refused to start, so a bug report can be answered."""
