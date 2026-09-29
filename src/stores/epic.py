@@ -177,15 +177,23 @@ class EpicGamesClaimer(BaseClaimer):
 
     async def _set_cookies(self) -> None:
         """Pre-set cookies to skip the cookie consent popup and age verification dialogs."""
-        if self.page:
-            await self.page.evaluate(
-                """
-                // Cookie consent: pretend we already accepted cookies 5 days ago
-                document.cookie = "OptanonAlertBoxClosed=" + new Date(Date.now() - 5*24*60*60*1000).toISOString() + "; domain=.epicgames.com; path=/";
-                // Age gate: set all age ratings to max so no "are you 18+?" popup appears
-                document.cookie = "HasAcceptedAgeGates=USK:9007199254740991,general:18,EPIC SUGGESTED RATING:18; domain=store.epicgames.com; path=/";
-                """
-            )
+        accepted_at = datetime.now(timezone.utc).isoformat()
+        await self.browser.context.add_cookies([
+            {
+                "name": "OptanonAlertBoxClosed",
+                "value": accepted_at,
+                "domain": ".epicgames.com",
+                "path": "/",
+                "secure": True,
+            },
+            {
+                "name": "HasAcceptedAgeGates",
+                "value": "USK:9007199254740991,general:18,EPIC SUGGESTED RATING:18",
+                "domain": "store.epicgames.com",
+                "path": "/",
+                "secure": True,
+            },
+        ])
 
     # ------------------------------------------------------------------
     # Login

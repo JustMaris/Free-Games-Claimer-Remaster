@@ -36,6 +36,28 @@ class TestOwnedState:
         assert not is_owned(state)
 
 
+class TestCookieSetup:
+    def test_cookies_are_added_through_the_browser_context(self):
+        claimer = EpicGamesClaimer()
+        saved = []
+
+        class Context:
+            async def add_cookies(self, cookies):
+                saved.extend(cookies)
+
+        class Browser:
+            context = Context()
+
+        claimer.browser = Browser()
+        asyncio.run(claimer._set_cookies())
+
+        assert {cookie["name"] for cookie in saved} == {
+            "OptanonAlertBoxClosed",
+            "HasAcceptedAgeGates",
+        }
+        assert all(cookie["secure"] for cookie in saved)
+
+
 class TestPageStateOrder:
     """An "In Library" chip in a recommendation row must not outrank this product's own button."""
 
