@@ -6,19 +6,22 @@ on:
       - main
       - dev
     tags:
-      - "v*.*"       # Release tags from main: v1.5 -> v1.5 + latest + main
-      - "v*.*d"      # Dev tags from dev: v1.5d -> v1.5d + dev
+      - "v*.*"
+      - "v*.*d"
   release:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      tag_override:
+        description: "Override Docker image tag"
+        required: false
+        type: string
 
 permissions:
   contents: read
   packages: write
 
-# A tag push repeats the build of a commit the branch push already started, and it
-# publishes a superset of the tags, so let the newer run replace the older one.
 concurrency:
   group: ghcr-${{ github.sha }}
   cancel-in-progress: true
@@ -28,9 +31,19 @@ env:
   IMAGE_NAME: ${{ github.event.repository.name }}
 
 jobs:
-  docker:
-    name: Build and publish Docker image
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout repository
@@ -42,8 +55,41 @@ jobs:
           echo "IMAGE_NAME_LC=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
           echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push architecture image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            COMMIT=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
+            NOW=${{ github.event.head_commit.timestamp }}
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME_LC }}:build-${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Normalize image name
+        shell: bash
+        run: |
+          echo "IMAGE_NAME_LC=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+          echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -55,34 +101,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME_LC }}
-          tags: |
-            # Branch pushes: dev -> :dev, main -> :main (inert on tag pushes).
-            type=ref,event=branch
-            # Dev release tag (v1.5d): version tag plus the image testers pull.
-            type=raw,value=${{ github.ref_name }},enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, 'd') }}
-            type=raw,value=dev,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && endsWith(github.ref_name, 'd') }}
-            # Stable release tag (v1.5): version tag plus what everyone else pulls.
-            type=raw,value=${{ github.ref_name }},enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !endsWith(github.ref_name, 'd') }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !endsWith(github.ref_name, 'd') }}
-            type=raw,value=main,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !endsWith(github.ref_name, 'd') }}
-            # Fallback for a release published by hand in the web UI.
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=raw,value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
-            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=sha,prefix=sha-
+      - name: Publish manifest tags
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TAG_OVERRIDE: ${{ github.event.inputs.tag_override }}
+        run: |
+          IMAGE="${REGISTRY}/${OWNER_LC}/${IMAGE_NAME_LC}"
+          SOURCES=("${IMAGE}:build-${GITHUB_SHA}-amd64" "${IMAGE}:build-${GITHUB_SHA}-arm64")
+          TAGS=("sha-${GITHUB_SHA::7}")
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          no-cache: true
-          # Same platforms as Docker Hub, so Raspberry Pi users can pull from GHCR too.
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          if [[ -n "$TAG_OVERRIDE" ]]; then
+            TAGS+=("$TAG_OVERRIDE")
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/heads/* ]]; then
+            TAGS+=("${GITHUB_REF_NAME}")
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/* ]]; then
+            TAGS+=("${GITHUB_REF_NAME}")
+            if [[ "$GITHUB_REF_NAME" == *d ]]; then
+              TAGS+=("dev")
+            else
+              TAGS+=("latest" "main")
+            fi
+          elif [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            TAGS+=("latest" "$RELEASE_TAG")
+          else
+            TAGS+=("manual")
+          fi
+
+          ARGS=()
+          for tag in "${TAGS[@]}"; do
+            ARGS+=(--tag "${IMAGE}:${tag}")
+          done
+          docker buildx imagetools create "${ARGS[@]}" "${SOURCES[@]}"
