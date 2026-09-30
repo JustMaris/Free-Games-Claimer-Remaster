@@ -273,6 +273,7 @@ class BaseClaimer:
             "--no-first-run",
             "--password-store=basic",
             "--use-mock-keychain",
+            "--js-flags=\"--max-old-space-size=512\"",
         ]
         if not force_headful:
             args.append("--disable-gpu")
