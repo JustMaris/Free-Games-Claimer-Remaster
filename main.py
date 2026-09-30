@@ -33,15 +33,6 @@ from src.core.run_state import reset_run_state, waiting_for_you
 from src.core.status import write_status_json, RunTiming
 from src.core.selection import apply_run_selection
 from src.core.updates import notify_if_update_available
-from src.stores.aliexpress import claim_aliexpress
-from src.stores.epic import claim_epic
-from src.stores.epic_fab import claim_fab
-from src.stores.gamerpower import claim_side_stores, discover_giveaways
-from src.stores.gog import claim_gog
-from src.stores.prime import claim_prime
-from src.stores.steam import claim_steam
-from src.stores.unity import claim_unity
-from src.stores.ubisoft import claim_ubisoft
 from src.core.notifier import notify
 from src.version import __version__, __author__, __repo__, __contributors__
 
@@ -104,18 +95,15 @@ logging.getLogger("asyncio").addFilter(ReapedChildFilter())
 # Store registry – canonical name → (display name, coroutine function)
 # ---------------------------------------------------------------------------
 
-# Registry of all available store claimers.
-# Each entry maps a short name to a (display name, function) pair.
-# When the scheduler runs, it loops through these and calls each function.
-ALL_CLAIMERS: dict[str, tuple[str, object]] = {
-    "steam":      ("Steam",        claim_steam),
-    "epic":       ("Epic Games",   claim_epic),
-    "fab":        ("Fab",          claim_fab),
-    "prime":      ("Prime Gaming", claim_prime),
-    "gog":        ("GOG",          claim_gog),
-    "ubisoft":    ("Ubisoft",      claim_ubisoft),
-    "unity":      ("Unity",        claim_unity),
-    "aliexpress": ("AliExpress",   claim_aliexpress),
+ALL_CLAIMERS: dict[str, tuple[str, str, str]] = {
+    "steam":      ("Steam",        "src.stores.steam", "claim_steam"),
+    "epic":       ("Epic Games",   "src.stores.epic", "claim_epic"),
+    "fab":        ("Fab",          "src.stores.epic_fab", "claim_fab"),
+    "prime":      ("Prime Gaming", "src.stores.prime", "claim_prime"),
+    "gog":        ("GOG",          "src.stores.gog", "claim_gog"),
+    "ubisoft":    ("Ubisoft",      "src.stores.ubisoft", "claim_ubisoft"),
+    "unity":      ("Unity",        "src.stores.unity", "claim_unity"),
+    "aliexpress": ("AliExpress",   "src.stores.aliexpress", "claim_aliexpress"),
 }
 
 # Sites with no module of their own: GamerPower claims them, but they are chosen like any store.
@@ -138,7 +126,7 @@ _LEGACY_SIDE_FLAGS: dict[str, str] = {
 DEFAULT_STORES: list[str] = ["steam", "epic", "fab", "prime", "gog", "ubisoft", "aliexpress"]
 
 # Display name (e.g. "Prime Gaming") → canonical store key (e.g. "prime").
-_DISPLAY_TO_KEY: dict[str, str] = {disp: key for key, (disp, _) in ALL_CLAIMERS.items()}
+_DISPLAY_TO_KEY: dict[str, str] = {disp: key for key, (disp, _, _) in ALL_CLAIMERS.items()}
 
 
 def _store_key(name: str) -> str:
@@ -319,8 +307,16 @@ def _selected_stores() -> list[str]:
 
 
 def _get_active_claimers(selected: list[str]) -> list[tuple[str, str, object]]:
-    """Key, display name and entry point for every store with a module of its own."""
-    return [(k, ALL_CLAIMERS[k][0], ALL_CLAIMERS[k][1]) for k in selected if k in ALL_CLAIMERS]
+    """Import only the store modules selected for this run."""
+    from importlib import import_module
+
+    active = []
+    for key in selected:
+        if key not in ALL_CLAIMERS:
+            continue
+        name, module_name, function_name = ALL_CLAIMERS[key]
+        active.append((key, name, getattr(import_module(module_name), function_name)))
+    return active
 
 
 def _print_banner() -> None:
@@ -373,6 +369,7 @@ async def run_claimers() -> None:
     # when something in this run can use it.
     routed: dict = {}
     if sides or any(key in GP_TARGETS for key in selected):
+        from src.stores.gamerpower import discover_giveaways
         routed = await discover_giveaways()
 
     aggregated_results = []
@@ -434,6 +431,7 @@ async def run_claimers() -> None:
     # Last: the sites with no module of their own, all in one browser window.
     if sides and routed:
         try:
+            from src.stores.gamerpower import claim_side_stores
             res = await claim_side_stores(routed)
             if isinstance(res, dict) and res.get("games"):
                 aggregated_results.append(res)
