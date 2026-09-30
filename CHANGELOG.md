@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **GPU acceleration flags are now preserved for stores that need them** – The Chromium flag filter in `BaseClaimer.start_browser()` was removing `--ignore-gpu-blocklist` and `--enable-unsafe-webgpu` flags even when explicitly added by store modules (Epic, Steam, Fab). The filter now only applies to base arguments, preserving store-specific GPU flags. This should reduce captcha triggers on Epic and Steam.
+- **Chromium launch no longer fails with "Arguments can not specify page to be opened"** – Two issues in `BaseClaimer.start_browser()`: (1) `--disk-cache-dir` was added as two separate args where the path value failed Playwright's validation; fixed by using single-arg format `--disk-cache-dir=<path>`. (2) Invalid `viewport` and `no_viewport` parameters were removed from `launch_persistent_context`. Also split `--js-flags=--max-old-space-size=512` into two separate args for Chromium compatibility.
 
 ### Changed
 - **Scheduler jobs now have a timeout** – Added 1-hour timeout to scheduled claim runs to prevent hung jobs from blocking the scheduler indefinitely.
