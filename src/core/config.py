@@ -191,6 +191,7 @@ class Config:
     novnc_port: str = os.getenv("NOVNC_PORT", "7080")
     vnc_ip: str = os.getenv("VNC_IP", "localhost")
     browser_executable: str | None = os.getenv("BROWSER_EXECUTABLE")
+    browser_cache_dir: str | None = os.getenv("BROWSER_CACHE_DIR") or None
     # Full public noVNC address for reverse proxies; replaces VNC_IP and NOVNC_PORT in links.
     vnc_url_base: str | None = os.getenv("VNC_URL")
 

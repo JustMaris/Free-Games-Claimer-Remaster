@@ -143,6 +143,7 @@ Options are set via environment variables in `.env`:
 | `VNC_MODE` | `on` | Whether to expose noVNC: `on` = always, `auto` = only when a manual step is needed (stops after `VNC_IDLE_TIMEOUT`), `off` = never. |
 | `VNC_IDLE_TIMEOUT` | `60` | Seconds to keep VNC running after the manual step is completed (only with `VNC_MODE=auto`). |
 | `BROWSER_EXECUTABLE` | | Path to the Chromium executable. Leave blank to use the system default. |
+| `BROWSER_CACHE_DIR` | *(empty)* | Where Chromium stores its disk cache. Empty = default in-memory cache (fast, uses RAM). Set to a path on the data volume to push cache to disk (slower I/O, lower RAM). On NVMe this is a good trade-off. |
 | `EMAIL` | | Default login email used by ALL stores unless a store-specific `*_EMAIL` overrides it. |
 | `PASSWORD` | | Default login password used by ALL stores unless a store-specific `*_PASSWORD` overrides it. |
 | `EG_EMAIL` | | Epic Games login email. |
