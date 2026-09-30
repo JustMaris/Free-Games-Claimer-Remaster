@@ -284,53 +284,46 @@ class BaseClaimer:
 
         launch_error: Exception | None = None
         for attempt in range(1, 4):
-            try:
-                if not headless and not self._display_leased:
-                    await display_manager.acquire()
-                    self._display_leased = True
-                self._playwright = await async_playwright().start()
-                context = await self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(store_browser_dir),
-                    executable_path=chrome_path,
-                    headless=headless,
-                    args=args,
-                    ignore_default_args=["--enable-automation"],
-                    viewport={"width": cfg.width, "height": cfg.height},
-                    locale="en-US",
-                    no_viewport=False,
-                    chromium_sandbox=False,
-                )
-                self.browser = BrowserAdapter(context)
-                raw_page = context.pages[0] if context.pages else await context.new_page()
-                self.page = PageAdapter(raw_page)
-                await context.add_init_script(self._PLAYWRIGHT_INIT_JS)
-                if self.inject_base_stealth:
-                    await context.add_init_script(self._STEALTH_JS)
-                self.logger.debug("Chromium started (headless=%s, profile=%s, extra args=%s)",
-                                  headless, store_browser_dir, extra_args or [])
-                launch_error = None
-                break
-            except Exception as e:
-                launch_error = e
-                self.logger.warning("Chromium launch attempt %d/3 failed: %s", attempt, e)
-                await self.close_browser()
-                await asyncio.to_thread(self._sweep_orphan_chrome, store_browser_dir)
-                self._clear_profile_locks(store_browser_dir)
-                if attempt < 3:
-                    await asyncio.sleep(2 * attempt)
-                self.page = None
-                self.browser = None
-                self._playwright = None
-                launch_error = e
-                if attempt < 3:
-                    await asyncio.sleep(2 * attempt)  # backoff
-                    continue
-                raise RuntimeError("unreachable")
-        if launch_error is not None:
-            await asyncio.to_thread(self._log_launch_diagnostics, store_browser_dir, chrome_path)
-            raise RuntimeError(
-                f"Chromium failed to start after 3 attempts (a container restart may help): {launch_error}"
-            ) from launch_error
+             try:
+                 if not headless and not self._display_leased:
+                     await display_manager.acquire()
+                     self._display_leased = True
+                 self._playwright = await async_playwright().start()
+                 context = await self._playwright.chromium.launch_persistent_context(
+                     user_data_dir=str(store_browser_dir),
+                     executable_path=chrome_path,
+                     headless=headless,
+                     args=args,
+                     ignore_default_args=["--enable-automation"],
+                     viewport={"width": cfg.width, "height": cfg.height},
+                     locale="en-US",
+                     no_viewport=False,
+                     chromium_sandbox=False,
+                 )
+                 self.browser = BrowserAdapter(context)
+                 raw_page = context.pages[0] if context.pages else await context.new_page()
+                 self.page = PageAdapter(raw_page)
+                 await context.add_init_script(self._PLAYWRIGHT_INIT_JS)
+                 if self.inject_base_stealth:
+                     await context.add_init_script(self._STEALTH_JS)
+                 self.logger.debug("Chromium started (headless=%s, profile=%s, extra args=%s)",
+                                   headless, store_browser_dir, extra_args or [])
+                 launch_error = None
+                 break
+             except Exception as e:
+                 launch_error = e
+                 self.logger.warning("Chromium launch attempt %d/3 failed: %s", attempt, e)
+                 await self.close_browser()
+                 await asyncio.to_thread(self._sweep_orphan_chrome, store_browser_dir)
+                 self._clear_profile_locks(store_browser_dir)
+                 if attempt < 3:
+                     await asyncio.sleep(2 * attempt)
+                     continue
+         if launch_error is not None:
+             await asyncio.to_thread(self._log_launch_diagnostics, store_browser_dir, chrome_path)
+             raise RuntimeError(
+                 f"Chromium failed to start after 3 attempts (a container restart may help): {launch_error}"
+             ) from launch_error
         self.log_browser_ready()
         return self.browser
 
