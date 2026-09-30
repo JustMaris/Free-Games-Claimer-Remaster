@@ -374,6 +374,12 @@ async def run_claimers() -> None:
     aggregated_results = []
 
     run_timing = RunTiming(last_run_started_at=run_started_at)
+    write_status_json(
+        vnc_mode=cfg.vnc_mode,
+        selected_stores=selected,
+        run_state="running",
+        run_timing=run_timing,
+    )
 
     for key, name, func in claimers:
         try:
@@ -603,10 +609,6 @@ async def main() -> None:
             name=f"Claim free games at {hour:02d}:{minute:02d}",
             replace_existing=True,
         )
-
-    # Delay slightly to ensure TurboVNC/X11 is fully initialized BEFORE starting Chrome
-    logger.info("Waiting for virtual display to initialize...")
-    await asyncio.sleep(3)
 
     # Also run immediately on startup
     if cfg.run_on_startup:
