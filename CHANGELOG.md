@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **GPU acceleration flags are now preserved for stores that need them** – The Chromium flag filter in `BaseClaimer.start_browser()` was removing `--ignore-gpu-blocklist` and `--enable-unsafe-webgpu` flags even when explicitly added by store modules (Epic, Steam, Fab). The filter now only applies to base arguments, preserving store-specific GPU flags. This should reduce captcha triggers on Epic and Steam.
+
+### Changed
+- **Scheduler jobs now have a timeout** – Added 1-hour timeout to scheduled claim runs to prevent hung jobs from blocking the scheduler indefinitely.
+- **Improved browser process cleanup** – Enhanced `_sweep_orphan_chrome()` with better Chrome/Chromium process detection and added automatic cleanup in `close_browser()`.
+- **Docker resource limits** – Added CPU (2) and memory (4GB) limits to prevent container from consuming excessive system resources.
+
+### Added
+- **Type hints for all store modules** – Added `TypedDict` definitions in `src/types.py` (GameDict, StoreResultDict, ClaimedGameDict) and type hints to all store module `run()` methods where applicable.
+- **Timing constants** – Added maintainable timing constants to all store modules (PAGE_LOAD_TIMEOUT, LOGIN_SETTLE_TIME, ANIMATION_DELAY, etc.) to replace hardcoded wait times.
+- **Cleaner configuration** – Simplified browser_dir and screenshots_dir path logic in `src/core/config.py` for better readability.
+
 ## [1.9] - 2026-09-11
 
 ### Added
