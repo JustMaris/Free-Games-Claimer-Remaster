@@ -273,6 +273,7 @@ class BaseClaimer:
             "--no-first-run",
             "--password-store=basic",
             "--use-mock-keychain",
+            *(f"--disk-cache-dir={cfg.browser_cache_dir}" if cfg.browser_cache_dir else ()),
             "--js-flags=\"--max-old-space-size=512\"",
         ]
         if not force_headful:
