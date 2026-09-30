@@ -277,6 +277,8 @@ class BaseClaimer:
         if cfg.browser_cache_dir:
             args.extend(["--disk-cache-dir", cfg.browser_cache_dir])
         args.append("--js-flags=--max-old-space-size=512")
+        # Filter out invalid Chromium flags that cause launch errors
+        args = [f for f in args if not (f.startswith('--ignore-gpu-blocklist') or 'enable-unsafe-webgpu' in f)]
         if not force_headful:
             args.append("--disable-gpu")
         if extra_args:
