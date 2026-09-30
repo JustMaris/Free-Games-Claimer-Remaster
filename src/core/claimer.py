@@ -284,7 +284,6 @@ class BaseClaimer:
         if extra_args:
             args.extend(extra_args)
 
-        self.logger.info("Chromium args: %s", args)
 
         launch_error: Exception | None = None
         for attempt in range(1, 4):
