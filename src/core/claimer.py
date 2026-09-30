@@ -277,10 +277,10 @@ class BaseClaimer:
             "--use-mock-keychain",
         ]
         if cfg.browser_cache_dir:
-            args.extend(["--disk-cache-dir", cfg.browser_cache_dir])
+            args.append(f"--disk-cache-dir={cfg.browser_cache_dir}")
         # Filter out invalid Chromium flags from base args only (not extra_args which may contain them intentionally)
         args = [f for f in args if not (f.startswith('--ignore-gpu-blocklist') or 'enable-unsafe-webgpu' in f)]
-        args.append("--js-flags=--max-old-space-size=512")
+        args.extend(["--js-flags", "--max-old-space-size=512"])
         if not force_headful:
             args.append("--disable-gpu")
         if extra_args:
