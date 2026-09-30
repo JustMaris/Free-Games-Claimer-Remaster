@@ -300,9 +300,7 @@ class BaseClaimer:
                     headless=headless,
                     args=args,
                     ignore_default_args=["--enable-automation"],
-                    viewport={"width": cfg.width, "height": cfg.height},
                     locale="en-US",
-                    no_viewport=False,
                     chromium_sandbox=False,
                 )
                 self.browser = BrowserAdapter(context)
