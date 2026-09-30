@@ -219,8 +219,11 @@ class Config:
     # NOT /fgc/src/data.  config.py lives at /fgc/src/core/config.py,
     # so project root is .parent.parent.parent → /fgc.
     _data_dir: Path = Path(__file__).resolve().parent.parent.parent / "data"
-    browser_dir: Path = Path(os.getenv("BROWSER_DIR") or "") if os.getenv("BROWSER_DIR") else _data_dir / "browser"
-    screenshots_dir: Path = Path(os.getenv("SCREENSHOTS_DIR") or "") if os.getenv("SCREENSHOTS_DIR") else _data_dir / "screenshots"
+    # More readable: use BROWSER_DIR if set and non-empty, otherwise use default data/browser
+    browser_env = os.getenv("BROWSER_DIR")
+    browser_dir: Path = Path(browser_env) if browser_env else _data_dir / "browser"
+    screenshots_env = os.getenv("SCREENSHOTS_DIR")
+    screenshots_dir: Path = Path(screenshots_env) if screenshots_env else _data_dir / "screenshots"
 
     # --- Database ---
     database_url: str = f"sqlite+aiosqlite:///{_data_dir}/fgc.db"

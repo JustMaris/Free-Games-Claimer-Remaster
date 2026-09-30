@@ -10,6 +10,14 @@ services:
     restart: unless-stopped
     tty: true
     stdin_open: true
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     ports:
       - "${NOVNC_PORT:-7080}:7080"
     volumes:

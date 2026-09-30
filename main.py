@@ -172,6 +172,7 @@ _CLAIM_JOB_OPTIONS = {
     "max_instances": 1,
     "coalesce": True,
     "misfire_grace_time": 1800,
+    "timeout": 3600,  # 1 hour max per run to prevent hung jobs from blocking scheduler
 }
 _claim_run_lock = asyncio.Lock()
 

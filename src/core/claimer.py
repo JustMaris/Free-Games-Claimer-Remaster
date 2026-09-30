@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -92,6 +93,7 @@ class BaseClaimer:
         self.page: PageAdapter | None = None
         self.user: str | None = None
         self.notify_games: list[dict] = []
+        self._browser_process: subprocess.Popen | None = None  # Track browser process for cleanup
 
     # ------------------------------------------------------------------
     # Browser lifecycle
@@ -276,9 +278,9 @@ class BaseClaimer:
         ]
         if cfg.browser_cache_dir:
             args.extend(["--disk-cache-dir", cfg.browser_cache_dir])
-        args.append("--js-flags=--max-old-space-size=512")
-        # Filter out invalid Chromium flags that cause launch errors
+        # Filter out invalid Chromium flags from base args only (not extra_args which may contain them intentionally)
         args = [f for f in args if not (f.startswith('--ignore-gpu-blocklist') or 'enable-unsafe-webgpu' in f)]
+        args.append("--js-flags=--max-old-space-size=512")
         if not force_headful:
             args.append("--disable-gpu")
         if extra_args:
@@ -363,6 +365,12 @@ class BaseClaimer:
         if getattr(self, "_display_leased", False):
             await display_manager.release()
             self._display_leased = False
+        # Additional cleanup: sweep orphaned Chrome processes for this profile
+        try:
+            store_browser_dir = cfg.browser_dir / (self.profile_name or self.store_name)
+            await asyncio.to_thread(self._sweep_orphan_chrome, store_browser_dir)
+        except Exception as e:
+            self.logger.debug("Failed to sweep orphaned Chrome processes: %s", e)
 
     def _log_launch_diagnostics(self, profile_dir: Path, chrome_path: str | None) -> None:
         """Say what the machine looked like when Chrome refused to start, so a bug report can be answered."""
@@ -455,13 +463,20 @@ class BaseClaimer:
             return 0
         needle = str(store_browser_dir)
         killed = 0
-        for proc in psutil.process_iter(["name", "cmdline"]):
+        for proc in psutil.process_iter(["name", "cmdline", "pid"]):
             try:
                 name = (proc.info.get("name") or "").lower()
-                if "chrome" not in name and "chromium" not in name:
-                    continue
-                cmdline = " ".join(proc.info.get("cmdline") or [])
-                if needle in cmdline:
+                # Check for Chrome/Chromium by name, but also catch any process with Chrome in cmdline
+                cmdline = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline)
+                
+                if "chrome" not in name.lower() and "chromium" not in name.lower():
+                    # Still check if Chrome is in the command line (e.g., chromium-browser)
+                    if not any("chrome" in arg.lower() or "chromium" in arg.lower() for arg in cmdline):
+                        continue
+                
+                # Check if this process uses our profile directory
+                if needle in cmdline_str:
                     self._kill_process_tree(proc.pid)
                     killed += 1
             except Exception:

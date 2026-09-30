@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import httpx
 import pyotp
 from tenacity import retry, stop_after_attempt, wait_exponential
+from typing import TYPE_CHECKING
 
 from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS, now_str
 from src.core.config import cfg
@@ -18,7 +19,20 @@ from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 from src.stores.epic_mobile import fetch_mobile_free_games
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.epic")
+
+# Timing constants (in seconds) for maintainability
+EPIC_PAGE_LOAD_TIMEOUT = 10.0
+EPIC_LOGIN_SETTLE_TIME = 3.0
+EPIC_ANIMATION_DELAY = 3.0
+EPIC_TYPING_DELAY = 0.5
+EPIC_2FA_WAIT_TIME = 3.0
+EPIC_MAX_LOGIN_ATTEMPTS = 3
+EPIC_LOGIN_WAIT_LOOP = 120  # seconds to wait for login to complete
+EPIC_CHALLENGE_SETTLE = 12.0  # seconds to wait for challenge to auto-clear
 
 # URL of Epic's free games page (where we look for available free games)
 URL_CLAIM = "https://store.epicgames.com/en-US/free-games"
@@ -102,7 +116,7 @@ class EpicGamesClaimer(BaseClaimer):
         # Mobile game URL -> "Android"/"iOS", so claims can be told apart (same title on every platform).
         self._platform_labels: dict[str, str] = {}
 
-    async def run(self, extra_games: list | None = None) -> None:
+    async def run(self, extra_games: list[GameDict] | None = None) -> None:
         """Main entry point: detect free games and claim them."""
         logger.debug("Starting Epic Games claiming flow")
         try:
@@ -119,7 +133,7 @@ class EpicGamesClaimer(BaseClaimer):
             # Set cookies to bypass age gates and cookie consent popups
             await self._set_cookies()
             await self.page.get(URL_CLAIM)
-            await self.sleep(3)
+            await self.sleep(EPIC_PAGE_LOAD_TIMEOUT)
 
             # Step 1: Make sure we are logged in
             if not await self._ensure_logged_in():
@@ -316,10 +330,10 @@ class EpicGamesClaimer(BaseClaimer):
 
             if attempt > 0:
                 await self.page.get("https://store.epicgames.com/")
-                await self.sleep(3)
+                await self.sleep(EPIC_LOGIN_SETTLE_TIME)
 
             await self._navigate_organically_to_login()
-            await self.sleep(3)
+            await self.sleep(EPIC_LOGIN_SETTLE_TIME)
 
             await self._do_stealth_login()
 
@@ -342,7 +356,7 @@ class EpicGamesClaimer(BaseClaimer):
                         # Seed gone or absent: one recovery code, then it is over to you.
                         if not backup_tried and await self._fill_backup_code():
                             backup_tried = True
-                            await self.sleep(3)
+                            await self.sleep(EPIC_2FA_WAIT_TIME)
                             continue
                         mfa_manual = True
                         break
@@ -351,10 +365,10 @@ class EpicGamesClaimer(BaseClaimer):
                         logger.warning("Epic did not accept the code (%s), reloading and trying once more.",
                                        await self._mfa_error_text() or "no message on screen")
                         await self.page.reload()
-                        await self.sleep(4)
+                        await self.sleep(EPIC_ANIMATION_DELAY)
                     otp_tried += 1
                     await self._fill_totp()
-                    await self.sleep(3)
+                    await self.sleep(EPIC_2FA_WAIT_TIME)
                     continue
 
                 # Epic asks which account to continue with after any half-finished sign-in.
