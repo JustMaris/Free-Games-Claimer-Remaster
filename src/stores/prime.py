@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 import logging
+from typing import TYPE_CHECKING
 
 import pyotp
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -13,7 +14,16 @@ from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS, open_first_tab, now_
 from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.prime")
+
+# Timing constants (in seconds) for maintainability
+PRIME_PAGE_LOAD_TIMEOUT = 10.0
+PRIME_LOGIN_SETTLE_TIME = 4.0
+PRIME_ANIMATION_DELAY = 3.0
+PRIME_TYPING_DELAY = 0.5
 
 # Prime Gaming claims page URL (shows all available free games)
 BASE_URL = "https://luna.amazon.com"

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import TYPE_CHECKING
 
 import pyotp
 
@@ -16,7 +17,16 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.fab")
+
+# Timing constants (in seconds) for maintainability
+FAB_PAGE_LOAD_TIMEOUT = 10.0
+FAB_LOGIN_SETTLE_TIME = 3.0
+FAB_ANIMATION_DELAY = 2.0
+FAB_TYPING_DELAY = 0.5
 
 URL_FREE = "https://www.fab.com/limited-time-free?lang=en"
 URL_LISTING = "https://www.fab.com/listings/{uid}"

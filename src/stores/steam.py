@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -13,7 +14,17 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.steam")
+
+# Timing constants (in seconds) for maintainability
+STEAM_PAGE_LOAD_TIMEOUT = 10.0
+STEAM_LOGIN_SETTLE_TIME = 3.0
+STEAM_ANIMATION_DELAY = 3.0
+STEAM_TYPING_DELAY = 0.5
+STEAMDB_LOAD_TIMEOUT = 15.0
 
 # SteamDB page listing upcoming and current free promotions
 STEAMDB_FREE_URL = "https://steamdb.info/upcoming/free/"
@@ -26,7 +37,7 @@ URL_LOGIN = "https://store.steampowered.com/login/"
 class SteamClaimer(BaseClaimer):
     store_name = "steam"
 
-    async def run(self, extra_games: list | None = None) -> None:
+    async def run(self, extra_games: list[GameDict] | None = None) -> None:
         """Main entry point: find free Steam games and claim them.
         
         Flow:
@@ -88,15 +99,15 @@ class SteamClaimer(BaseClaimer):
             # Warm-up navigation to build history/trust and invisibly pass Cloudflare Turnstile
             logger.debug("Warming up session by navigating to SteamDB home page...")
             await self.page.get("https://steamdb.info/")
-            await self.sleep(3)
+            await self.sleep(STEAM_LOGIN_SETTLE_TIME)
 
             await self.page.get(STEAMDB_FREE_URL)
-            await self.sleep(10)  # Wait for page load and any invisible Turnstile checks
+            await self.sleep(STEAMDB_LOAD_TIMEOUT)  # Wait for page load and any invisible Turnstile checks
 
             # SteamDB is behind Cloudflare; if the human-check shows instead of the listing, hand off to VNC.
             if await self._human_challenge_present():
                 if await self._wait_out_challenge("Steam / SteamDB"):
-                    await self.sleep(3)  # let the real listing finish loading
+                    await self.sleep(STEAM_PAGE_LOAD_TIMEOUT)  # let the real listing finish loading
                 else:
                     logger.warning("SteamDB Cloudflare challenge not cleared in time – skipping SteamDB.")
                     return []
@@ -242,7 +253,7 @@ class SteamClaimer(BaseClaimer):
         # Not logged in → navigate directly to login page
         logger.warning("Not signed in – redirecting to login page…")
         await self.page.get(URL_LOGIN)
-        await self.sleep(2)
+        await self.sleep(STEAM_ANIMATION_DELAY)
         await self._dismiss_cookie_banner()
 
         username, password = cfg.steam_username, cfg.steam_password
@@ -251,7 +262,7 @@ class SteamClaimer(BaseClaimer):
             
             # Verify auto-login worked
             await self.page.get(return_url)
-            await self.sleep(3)
+            await self.sleep(STEAM_PAGE_LOAD_TIMEOUT)
             if await _is_logged_in():
                 self.log_signed_in()
                 return
@@ -259,7 +270,7 @@ class SteamClaimer(BaseClaimer):
             # Auto-login failed (CAPTCHA, wrong creds, etc.) → fall back to VNC
             logger.warning("Auto-login failed. Falling back to VNC manual login…")
             await self.page.get(URL_LOGIN)
-            await self.sleep(2)
+            await self.sleep(STEAM_ANIMATION_DELAY)
         else:
             logger.warning("STEAM_USERNAME / STEAM_PASSWORD not set.")
 

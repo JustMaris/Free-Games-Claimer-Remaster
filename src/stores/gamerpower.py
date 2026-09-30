@@ -10,6 +10,7 @@ import re
 import asyncio
 import httpx
 from urllib.parse import urlparse
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
@@ -22,7 +23,14 @@ from src.core.url_security import url_has_allowed_host
 import logging
 from src.core.claimer import filenamify
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.gamerpower")
+
+# Timing constants (in seconds) for maintainability
+GP_API_TIMEOUT = 15.0
+GP_PAGE_LOAD_TIMEOUT = 10.0
 
 GAMERPOWER_API_URL = "https://www.gamerpower.com/api/giveaways"
 

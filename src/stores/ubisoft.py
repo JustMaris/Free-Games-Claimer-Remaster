@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
+from typing import TYPE_CHECKING
 
 import httpx
 import pyotp
@@ -19,7 +20,15 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.ubisoft")
+
+# Timing constants (in seconds) for maintainability
+UBI_PAGE_LOAD_TIMEOUT = 10.0
+UBI_LOGIN_SETTLE_TIME = 3.0
+UBI_ANIMATION_DELAY = 2.0
 
 URL_FREE = "https://www.ubisoft.com/en-us/games/free"
 URL_ACCOUNT = "https://account.ubisoft.com/en-US/account-information"

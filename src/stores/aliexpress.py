@@ -11,6 +11,7 @@ import json
 import logging
 import random
 import re
+from typing import TYPE_CHECKING
 
 from browserforge.fingerprints import FingerprintGenerator
 from browserforge.injectors.utils import InjectFunction
@@ -18,7 +19,15 @@ from browserforge.injectors.utils import InjectFunction
 from src.core.claimer import BaseClaimer
 from src.core.config import cfg
 
+if TYPE_CHECKING:
+    from src.types import GameDict
+
 logger = logging.getLogger("fgc.aliexpress")
+
+# Timing constants (in seconds) for maintainability
+AE_PAGE_LOAD_TIMEOUT = 10.0
+AE_LOGIN_SETTLE_TIME = 3.0
+AE_ANIMATION_DELAY = 2.0
 
 URL_LOGIN = "https://www.aliexpress.com/p/ug-login-page/login.html?fromMsite=true"
 URL_COINS = "https://m.aliexpress.com/p/coin-index/index.html"
