@@ -27,7 +27,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, timezone
 
 from src.core.config import cfg, settings_warnings
-from src.core.claimer import mask_account
 from src.core.database import init_db
 from src.core.run_state import reset_run_state, waiting_for_you
 from src.core.status import write_status_json, RunTiming
@@ -465,6 +464,7 @@ async def run_claimers() -> None:
                              result.get("store"), len(result["games"]))
                 continue
                 
+            from src.core.claimer import mask_account
             account = mask_account(result.get('user'))
             header = f"**{result['store']}** ({account}):" if account else f"**{result['store']}**:"
             msg_parts.append(f"{header}\n{format_game_list(relevant_games)}")
