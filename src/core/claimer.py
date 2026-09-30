@@ -273,10 +273,12 @@ class BaseClaimer:
             "--no-first-run",
             "--password-store=basic",
             "--use-mock-keychain",
-            *(f"--disk-cache-dir={cfg.browser_cache_dir}" if cfg.browser_cache_dir else ()),
-            "--js-flags",
-            "--max-old-space-size=512",
         ]
+        if cfg.browser_cache_dir:
+            args.extend(["--disk-cache-dir", cfg.browser_cache_dir])
+        # Temporarily remove js-flags to fix launch error
+        # args.append("--js-flags=\"--max-old-space-size=512\"")
+        self.logger.debug("Chromium args: %s", args)
         if not force_headful:
             args.append("--disable-gpu")
         if extra_args:
