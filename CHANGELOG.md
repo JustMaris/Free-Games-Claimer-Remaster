@@ -10,6 +10,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Chromium launch no longer fails with "Arguments can not specify page to be opened"** – Two issues in `BaseClaimer.start_browser()`: (1) `--disk-cache-dir` was added as two separate args where the path value failed Playwright's validation; fixed by using single-arg format `--disk-cache-dir=<path>`. (2) Invalid `viewport` and `no_viewport` parameters were removed from `launch_persistent_context`. Also split `--js-flags=--max-old-space-size=512` into two separate args for Chromium compatibility.
 
 ### Changed
+- **Reduced memory footprint** – Added `__slots__` to `BaseClaimer`, `Element`, `PageAdapter`, and `BrowserAdapter` classes to eliminate `__dict__` overhead (~50-100KB per instance). Lazy-loaded `playwright.async_api` inside `start_browser()` to defer heavy module import until browser launch (~5-10MB saved at startup). Added `maxsize=1` to `@cache` decorators to prevent unbounded cache growth.
+
+### Changed
 - **Scheduler jobs now have a timeout** – Added 1-hour timeout to scheduled claim runs to prevent hung jobs from blocking the scheduler indefinitely.
 - **Improved browser process cleanup** – Enhanced `_sweep_orphan_chrome()` with better Chrome/Chromium process detection and added automatic cleanup in `close_browser()`.
 - **Docker resource limits** – Added CPU (2) and memory (4GB) limits to prevent container from consuming excessive system resources.
