@@ -92,7 +92,7 @@ _DEPRECATED = {
 }
 
 
-@cache
+@cache(maxsize=1)
 def env_setting_kinds() -> dict:
     """Every setting this file reads, mapped to the kind of value it expects."""
     try:
@@ -102,7 +102,7 @@ def env_setting_kinds() -> dict:
     return {name: _KIND_BY_HELPER[helper] for helper, name in _SETTING_RE.findall(source)}
 
 
-@cache
+@cache(maxsize=1)
 def known_env_names() -> set:
     """Settings the bot reads, plus the Docker-only ones, which live in .env.example."""
     names = set(env_setting_kinds()) | set(_DEPRECATED)

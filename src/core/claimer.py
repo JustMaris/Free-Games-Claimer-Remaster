@@ -27,7 +27,6 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
-from playwright.async_api import async_playwright
 import pyotp
 
 from src.core.browser import BrowserAdapter, Element, PageAdapter
@@ -73,6 +72,11 @@ class BaseClaimer:
         ``store_name``  – class-level string (e.g. ``"epic"``)
         ``run()``       – main claiming coroutine
     """
+
+    __slots__ = (
+        '_playwright', '_display_leased', 'browser', 'page',
+        'user', 'notify_games', '_browser_process',
+    )
 
     store_name: str = "base"
 
@@ -293,6 +297,7 @@ class BaseClaimer:
                 if not headless and not self._display_leased:
                     await display_manager.acquire()
                     self._display_leased = True
+                from playwright.async_api import async_playwright
                 self._playwright = await async_playwright().start()
                 context = await self._playwright.chromium.launch_persistent_context(
                     user_data_dir=str(store_browser_dir),
