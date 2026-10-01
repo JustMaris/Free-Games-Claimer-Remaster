@@ -26,7 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, timezone
 
-from src.core.config import cfg
+from src.core.config import cfg, settings_warnings
 from src.core.database import init_db
 from src.core.run_state import reset_run_state, waiting_for_you
 from src.core.status import write_status_json, RunTiming
