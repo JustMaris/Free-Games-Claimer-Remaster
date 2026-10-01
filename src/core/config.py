@@ -113,62 +113,6 @@ def known_env_names() -> set:
     return names | set(re.findall(r"^#?\s*([A-Z_0-9]+)=", example, re.M))
 
 
-def env_file_settings() -> dict:
-    """Names and values actually set in your .env files. Commented-out lines set nothing."""
-    found = {}
-    for path in (_env_root, _env_data):
-        try:
-            # utf-8-sig: an editor-added BOM would otherwise glue itself to the first name.
-            text = path.read_text(encoding="utf-8-sig")
-        except OSError:
-            continue
-        for name, value in _ENV_LINE_RE.findall(text):
-            found[name] = value.strip().strip('"').strip("'")
-    return found
-
-
-def mask_value(name: str, value: str) -> str:
-    """A value safe to print in a log someone will paste into a bug report."""
-    upper = (name or "").upper()
-    if upper == "NOTIFY" or any(hint in upper for hint in _SECRET_HINTS):
-        return "***"
-    # Catches a credential under a name we did not think of.
-    if "@" in value or "://" in value:
-        return "***"
-    return value[:40]
-
-
-def _looks_int(value: str) -> bool:
-    """True when _int() would accept this value instead of falling back."""
-    try:
-        int(value)
-    except ValueError:
-        return False
-    return True
-
-
-def settings_warnings() -> list:
-    """Settings that do nothing: unknown names, and values that cannot mean what they say."""
-    kinds = env_setting_kinds()
-    known = known_env_names()
-    out = []
-    for name, value in env_file_settings().items():
-        if name in _DEPRECATED:
-            new_name = _DEPRECATED[name]
-            out.append(f"{name} has been renamed to {new_name}, please update your .env. "
-                       "The old name still works in this version." if new_name else
-                       f"{name} is no longer needed: the codes themselves switch this on.")
-        elif name not in known:
-            out.append(f"{name} is not a setting this bot reads, so it does nothing.")
-        elif kinds.get(name) == "bool" and value.lower() not in _TRUTHY + _FALSY:
-            out.append(f"{name}={mask_value(name, value)} is not a yes/no value, so it reads as false.")
-        elif kinds.get(name) == "int" and value and not _looks_int(value):
-            out.append(f"{name}={mask_value(name, value)} is not a number, so the default is used.")
-        elif name == "VNC_MODE" and value.lower() not in ("on", "auto", "off"):
-            out.append(f"VNC_MODE={mask_value(name, value)} is invalid; use on, auto, or off.")
-    return out
-
-
 class Config:
     """All application settings in one place.
     

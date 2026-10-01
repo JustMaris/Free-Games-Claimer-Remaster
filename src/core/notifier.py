@@ -116,14 +116,3 @@ async def notify(
         if isinstance(result, Exception):
             logger.exception("Failed to send notification", exc_info=result)
 
-
-def format_game_list(games: list[dict]) -> str:
-    """Format a list of ``{title, url, status}`` dicts into a readable string."""
-    lines: list[str] = []
-    for g in games:
-        url = g.get("url", "")
-        title = g.get("title", "Unknown")
-        status = g.get("status", "?")
-        lines.append(f"• **[{title}]({url})**: {status}")
-    return "\n".join(lines)
-

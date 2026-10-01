@@ -37,10 +37,6 @@ class PageAdapter:
     def url(self) -> str:
         return self._page.url
 
-    @property
-    def target(self):
-        return type("Target", (), {"url": self.url})()
-
     async def get(self, url: str) -> PageAdapter:
         await self._page.goto(url, wait_until="domcontentloaded")
         return self
