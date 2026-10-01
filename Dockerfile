@@ -1,4 +1,4 @@
-FROM python:3.14.7-trixie AS python-deps
+FROM python:3.14-slim AS python-deps
 
 ARG DEBIAN_FRONTEND=noninteractive
 COPY requirements.txt /tmp/requirements.txt
@@ -8,7 +8,7 @@ RUN apt-get update \
     && find /opt/python -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /opt/python -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
-FROM python:3.14.7-trixie
+FROM python:3.14-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DEBIAN_FRONTEND=noninteractive
