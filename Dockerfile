@@ -1,14 +1,14 @@
-FROM debian:sid-slim AS python-deps
+FROM python:3.14.7-trixie AS python-deps
 
 ARG DEBIAN_FRONTEND=noninteractive
 COPY requirements.txt /tmp/requirements.txt
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && apt-get install -y --no-install-recommends python3-pip \
     && pip install --no-cache-dir --break-system-packages --target /opt/python -r /tmp/requirements.txt \
     && find /opt/python -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /opt/python -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
-FROM debian:sid-slim
+FROM python:3.14.7-trixie
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DEBIAN_FRONTEND=noninteractive
@@ -16,7 +16,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' > /etc/apt/apt.conf.d/99fgc-net \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates tini python3 \
+        ca-certificates tini \
         xvfb x11vnc novnc websockify \
         chromium \
     && printf '#!/bin/sh\nexit 0\n' > /usr/bin/xdg-open \
@@ -26,8 +26,7 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\nAcquire::http::Ti
        | tee /etc/opt/chrome/policies/managed/fgc-autolaunch.json /etc/chromium/policies/managed/fgc-autolaunch.json > /dev/null \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/* /var/tmp/* /tmp/* /usr/share/doc/* \
-    && ln -sf /usr/share/novnc/vnc_auto.html /usr/share/novnc/index.html \
-    && ln -sf /usr/bin/python3 /usr/bin/python
+    && ln -sf /usr/share/novnc/vnc_auto.html /usr/share/novnc/index.html
 
 COPY --from=python-deps /opt/python /opt/python
 ENV PYTHONPATH=/opt/python
