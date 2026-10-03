@@ -281,6 +281,10 @@ def _warn_about_settings() -> None:
         logger.warning("NOTIFY_SKIP_STORES names %s, which is not a store, so nothing is silenced there. "
                        "Valid: %s", ", ".join(unknown), ", ".join(ALL_CLAIMERS))
 
+    if cfg.vnc_mode != "off" and cfg.notify_login_request and not (cfg.notify_url or cfg.discord_webhook):
+        logger.warning("No NOTIFY or DISCORD_WEBHOOK set: when a store needs you (login, captcha), "
+                       "nobody is told and the step times out after %ss.", cfg.vnc_login_timeout)
+
 
 def _selected_stores() -> list[str]:
     """Which store keys this run was asked for.
