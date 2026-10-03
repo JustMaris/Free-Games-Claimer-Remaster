@@ -98,7 +98,27 @@ class GOGClaimer(BaseClaimer):
             2. Look for a username displayed anywhere on the page
             3. Check if a "Sign in" link exists (means NOT logged in)
             4. Check if an avatar image exists (means logged in)
+
+            GOG's own /userData.json decides first: the page heuristics once read a generic
+            "Account" label as a username, so a dead session looked signed in and every claim
+            came back "Unauthorized".
             """
+            try:
+                api_raw = await self.page.evaluate(
+                    "fetch('/userData.json', {credentials: 'include'}).then(r => r.text())",
+                    await_promise=True,
+                )
+                api = json.loads(api_raw) if isinstance(api_raw, str) else {}
+            except Exception as exc:
+                logger.debug("userData.json unavailable, falling back to page checks: %s", exc)
+                api = {}
+            if isinstance(api, dict) and "isLoggedIn" in api:
+                logger.debug("Login check (userData.json): isLoggedIn=%s", api["isLoggedIn"])
+                if api["isLoggedIn"]:
+                    self.user = api.get("username") or "GOG User"
+                    return True
+                return False
+
             result_raw = await self.page.evaluate(
                 """
                 JSON.stringify((() => {
