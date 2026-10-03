@@ -22,6 +22,12 @@ docker logs fgc-fork 2>&1 | grep -oE "[^ ]+( [^ ]+)? is behind a Cloudflare" | s
 
 The log only counts challenges that didn't clear within the settle window. If that's too coarse, add a counter to `status.json`.
 
+**Evidence so far (homelab, one Epic account):**
+- Sep 29, upstream `p-adamiec:latest` (nodriver): 4 of 4 Epic claims went through unattended, about 75 s each.
+- Oct 1 to Oct 3, this fork on Playwright and then patchright: 0 unattended Epic claims. Every checkout hit an hCaptcha inside the cross-origin checkout iframe (screenshot `epic_checkout_*.png`, frame buttons `Add to library`, `TRY AGAIN`). Patchright made no difference.
+- Oct 3: with the iframe captcha detected and handed to VNC, BURIED STARS was claimed after a manual solve.
+- Still to do: one upstream v1.9 run on the same account against the same pending games, to rule out Epic's risk scoring changing between those dates.
+
 **Decision it feeds:** keep patchright, go back to nodriver (better upstream fit), or try patchright with real Chrome (`channel="chrome"`, x86-64 only).
 
 ## 2. Debian `chromium` driven by the pip Playwright driver
