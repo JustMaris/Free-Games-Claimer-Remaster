@@ -1128,6 +1128,12 @@ class EpicGamesClaimer(BaseClaimer):
                 accepted = False
                 
                 for attempt in range(25):
+                    # Epic's checkout raises an hCaptcha (after "Add to library" or "I accept") that
+                    # intercepts every click; only a human can clear it, so hand over before clicking.
+                    if await self._human_challenge_present():
+                        if not await self._wait_out_challenge(f"Epic checkout ({title})", store_key="epic"):
+                            break
+
                     actions = await self._checkout_actions()
 
                     if actions.get("add") and not add_clicked:
@@ -1161,10 +1167,6 @@ class EpicGamesClaimer(BaseClaimer):
                                 accepted = True
                                 await self.sleep(2)
 
-                    # Epic puts an hCaptcha in the checkout frame after "I accept"; only a human can clear it.
-                    if add_clicked and await self._human_challenge_present():
-                        if not await self._wait_out_challenge(f"Epic checkout ({title})", store_key="epic"):
-                            break
 
                     already_done = await self.page.evaluate(
                         """
