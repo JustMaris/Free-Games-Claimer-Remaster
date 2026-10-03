@@ -25,8 +25,9 @@ permissions:
   contents: read
   packages: write
 
+# Per PR, so a newer push cancels the older build instead of racing it for branch-<name>.
 concurrency:
-  group: ghcr-${{ github.sha }}
+  group: ghcr-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 env:
