@@ -75,7 +75,7 @@ logger = logging.getLogger("fgc")
 # Libraries that would otherwise bury our own diagnostics: every CDP frame, every
 # HTTP handshake, every SQLite call. DEBUG=true is about the bot, DEBUG_LIBS about these.
 NOISY_LIBRARIES = (
-    "playwright", "websockets", "httpx", "httpcore",
+    "patchright", "websockets", "httpx", "httpcore",
     "aiosqlite", "sqlalchemy", "apscheduler", "tzlocal", "asyncio", "apprise",
 )
 if not cfg.debug_libs:

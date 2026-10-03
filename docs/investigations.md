@@ -30,6 +30,8 @@ The log only counts challenges that didn't clear within the settle window. If th
 
 **How to check:** in the container, compare `chromium --version` with `python -c "import patchright, json, pathlib; print(json.loads((pathlib.Path(patchright.__file__).parent/'driver/package/browsers.json').read_text()))"`. Either pin a known-good pair in the Dockerfile or document how far apart they can drift.
 
+As of October 2026: Debian ships Chromium 154.0.8037.92 and patchright 1.63.0 expects 153.0.8010.12. Launch, navigation and evaluate all work at that one-major skew.
+
 ## 3. Removing `--restore-last-session` and GOG sessions
 
 **Why:** upstream used this flag to keep GOG's `gog-al` session cookie across Docker restarts (MODIFICATIONS.md, `gog.py`). The fork dropped it in the Playwright move. A persistent context keeps cookies that have an expiry, but drops session-only cookies when it closes.
@@ -41,6 +43,8 @@ The log only counts challenges that didn't clear within the settle window. If th
 **Why:** every store except Epic runs headless when `SHOW=0`. When one needs a human, the VNC lease starts Xvfb and noVNC, but the headless browser isn't on that display, so the user sees an empty screen.
 
 **How to check:** set `SHOW=0` and force a login on a non-Epic store. Then decide whether to relaunch that store headful for the manual step, or skip it with a clear log line.
+
+Related: headless mode reports `HeadlessChrome/154` in `navigator.userAgent`, which anti-bot scripts check for. That alone may be a reason to keep `SHOW=1` (the default), now that Xvfb only runs while a browser is open.
 
 ## 5. The V8 heap cap (`--js-flags=--max-old-space-size=512`)
 

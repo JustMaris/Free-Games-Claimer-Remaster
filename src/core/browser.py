@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from playwright.async_api import BrowserContext, ElementHandle, Page, TimeoutError as PlaywrightTimeoutError
+from patchright.async_api import BrowserContext, ElementHandle, Page, TimeoutError as PlaywrightTimeoutError
 
 
 class Element:

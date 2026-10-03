@@ -288,7 +288,7 @@ class BaseClaimer:
                 if not headless and not self._display_leased:
                     await display_manager.acquire()
                     self._display_leased = True
-                from playwright.async_api import async_playwright
+                from patchright.async_api import async_playwright
                 self._playwright = await async_playwright().start()
                 context = await self._playwright.chromium.launch_persistent_context(
                     user_data_dir=str(store_browser_dir),
