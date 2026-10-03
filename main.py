@@ -74,8 +74,9 @@ logger = logging.getLogger("fgc")
 
 # Libraries that would otherwise bury our own diagnostics: every CDP frame, every
 # HTTP handshake, every SQLite call. DEBUG=true is about the bot, DEBUG_LIBS about these.
+# urllib3/requests also log full request URLs, and Apprise puts tokens in them (Telegram).
 NOISY_LIBRARIES = (
-    "patchright", "websockets", "httpx", "httpcore",
+    "patchright", "websockets", "httpx", "httpcore", "urllib3", "requests",
     "aiosqlite", "sqlalchemy", "apscheduler", "tzlocal", "asyncio", "apprise",
 )
 if not cfg.debug_libs:
