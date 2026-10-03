@@ -25,10 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.ubisoft")
 
-# Timing constants (in seconds) for maintainability
-UBI_PAGE_LOAD_TIMEOUT = 10.0
-UBI_LOGIN_SETTLE_TIME = 3.0
-UBI_ANIMATION_DELAY = 2.0
 
 URL_FREE = "https://www.ubisoft.com/en-us/games/free"
 URL_ACCOUNT = "https://account.ubisoft.com/en-US/account-information"

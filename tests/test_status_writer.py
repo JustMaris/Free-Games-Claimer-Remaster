@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from src.core.status import write_status_json, RunTiming
+from src.core.status import write_status_json
 
 
 def test_status_writer_writes_json(tmp_path, monkeypatch):
@@ -13,11 +13,10 @@ def test_status_writer_writes_json(tmp_path, monkeypatch):
     monkeypatch.setattr(config.cfg, "_data_dir", data_dir, raising=False)
     monkeypatch.setattr("src.core.status.cfg", config.cfg, raising=False)
 
+    monkeypatch.setattr(config.cfg, "vnc_mode", "off", raising=False)
     write_status_json(
-        vnc_mode="off",
         selected_stores=["steam"],
         run_state="waiting_for_you",
-        run_timing=RunTiming(last_run_started_at=None, last_run_finished_at=None),
         last_summary={"claimed": 1, "failed": 2, "skipped": 3},
     )
 

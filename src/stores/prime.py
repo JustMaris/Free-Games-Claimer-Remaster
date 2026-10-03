@@ -19,11 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.prime")
 
-# Timing constants (in seconds) for maintainability
-PRIME_PAGE_LOAD_TIMEOUT = 10.0
-PRIME_LOGIN_SETTLE_TIME = 4.0
-PRIME_ANIMATION_DELAY = 3.0
-PRIME_TYPING_DELAY = 0.5
 
 # Prime Gaming claims page URL (shows all available free games)
 BASE_URL = "https://luna.amazon.com"
@@ -1222,7 +1217,6 @@ class PrimeGamingClaimer(BaseClaimer):
             if game_tab:
                 await game_tab.click()
                 await self.sleep(2)
-
 
 
 async def claim_prime() -> dict:

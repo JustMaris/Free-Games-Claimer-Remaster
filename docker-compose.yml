@@ -24,10 +24,6 @@ services:
       - fgc_data:/fgc/data
     env_file:
       - .env
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7080/status.json', timeout=3).read()"]
-      interval: 10s
-      timeout: 5s
 
 volumes:
   fgc_data:

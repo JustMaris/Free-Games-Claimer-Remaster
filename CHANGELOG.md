@@ -6,21 +6,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
-- **GPU acceleration flags are now preserved for stores that need them** – The Chromium flag filter in `BaseClaimer.start_browser()` was removing `--ignore-gpu-blocklist` and `--enable-unsafe-webgpu` flags even when explicitly added by store modules (Epic, Steam, Fab). The filter now only applies to base arguments, preserving store-specific GPU flags. This should reduce captcha triggers on Epic and Steam.
-- **Chromium launch no longer fails with "Arguments can not specify page to be opened"** – Two issues in `BaseClaimer.start_browser()`: (1) `--disk-cache-dir` was added as two separate args where the path value failed Playwright's validation; fixed by using single-arg format `--disk-cache-dir=<path>`. (2) Invalid `viewport` and `no_viewport` parameters were removed from `launch_persistent_context`. Also split `--js-flags=--max-old-space-size=512` into two separate args for Chromium compatibility.
+- **Chromium launch no longer fails with "Arguments can not specify page to be opened"**: `--disk-cache-dir` is now one `--disk-cache-dir=<path>` arg, and the invalid `viewport`/`no_viewport` parameters were removed from `launch_persistent_context`.
+- **The V8 heap cap actually applies**: `--js-flags=--max-old-space-size=512` is passed as one arg again. Split into two args, Chromium silently ignored it.
+- **Scheduled runs time out after an hour**: APScheduler 3 ignores a `timeout` job default, so the run is now wrapped in `asyncio.timeout(3600)`. A hung store can no longer block every later run.
+- **The container healthcheck works while noVNC is up**: it checks that port 7080 accepts connections instead of fetching `/status.json`, which websockify doesn't serve. `VNC_MODE=on` used to leave the container permanently unhealthy.
+- **`BaseClaimer` tests pass again**: removed the `__slots__` that made `store_name` read-only on instances.
 
 ### Changed
-- **Reduced memory footprint** – Added `__slots__` to `BaseClaimer`, `Element`, `PageAdapter`, and `BrowserAdapter` classes to eliminate `__dict__` overhead (~50-100KB per instance). Lazy-loaded `playwright.async_api` inside `start_browser()` to defer heavy module import until browser launch (~5-10MB saved at startup). Added `maxsize=1` to `@cache` decorators to prevent unbounded cache growth.
+- **`VNC_MODE` defaults to `auto`** everywhere. The image already set it; config, README and `.env.example` said `on`.
+- **The engine is patchright**, a drop-in Playwright build that patches the `Runtime.enable` and binding leaks anti-bot checks look for. See `docs/investigations.md` for the measurement plan.
+- **CI runs the test suite** on Python 3.14 (the image's version) whenever Python files change. PR images are built by `docker-ghcr.yml`, so the duplicate `docker-pr-build.yml` is gone.
+- **Docker resource limits**: CPU (2) and memory (4GB) limits in `docker-compose.yml`.
+- Lazy-loaded `playwright.async_api` inside `start_browser()`.
+- `close_browser()` also sweeps orphaned Chromium processes tied to the store's profile.
 
-### Changed
-- **Scheduler jobs now have a timeout** – Added 1-hour timeout to scheduled claim runs to prevent hung jobs from blocking the scheduler indefinitely.
-- **Improved browser process cleanup** – Enhanced `_sweep_orphan_chrome()` with better Chrome/Chromium process detection and added automatic cleanup in `close_browser()`.
-- **Docker resource limits** – Added CPU (2) and memory (4GB) limits to prevent container from consuming excessive system resources.
-
-### Added
-- **Type hints for all store modules** – Added `TypedDict` definitions in `src/types.py` (GameDict, StoreResultDict, ClaimedGameDict) and type hints to all store module `run()` methods where applicable.
-- **Timing constants** – Added maintainable timing constants to all store modules (PAGE_LOAD_TIMEOUT, LOGIN_SETTLE_TIME, ANIMATION_DELAY, etc.) to replace hardcoded wait times.
-- **Cleaner configuration** – Simplified browser_dir and screenshots_dir path logic in `src/core/config.py` for better readability.
+### Removed
+- Unused timing constants in store modules, unused `TypedDict`s in `src/types.py`, the no-op GPU-flag filter, and the duplicate compose healthcheck.
 
 ## [1.9] - 2026-09-11
 

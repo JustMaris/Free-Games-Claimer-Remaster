@@ -23,7 +23,6 @@ logger = logging.getLogger("fgc.steam")
 STEAM_PAGE_LOAD_TIMEOUT = 10.0
 STEAM_LOGIN_SETTLE_TIME = 3.0
 STEAM_ANIMATION_DELAY = 3.0
-STEAM_TYPING_DELAY = 0.5
 STEAMDB_LOAD_TIMEOUT = 15.0
 
 # SteamDB page listing upcoming and current free promotions

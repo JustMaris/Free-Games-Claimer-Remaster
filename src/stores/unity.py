@@ -21,10 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.unity")
 
-# Timing constants (in seconds) for maintainability
-UNITY_PAGE_LOAD_TIMEOUT = 10.0
-UNITY_LOGIN_SETTLE_TIME = 3.0
-UNITY_ANIMATION_DELAY = 2.0
 
 URL_SALE = "https://assetstore.unity.com/publisher-sale"
 URL_BASE = "https://assetstore.unity.com"

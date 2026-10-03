@@ -28,9 +28,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.gamerpower")
 
-# Timing constants (in seconds) for maintainability
-GP_API_TIMEOUT = 15.0
-GP_PAGE_LOAD_TIMEOUT = 10.0
 
 GAMERPOWER_API_URL = "https://www.gamerpower.com/api/giveaways"
 

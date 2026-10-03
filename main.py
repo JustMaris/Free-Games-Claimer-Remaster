@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from src.core.config import cfg, settings_warnings
 from src.core.database import init_db
 from src.core.run_state import reset_run_state, waiting_for_you
-from src.core.status import write_status_json, RunTiming
+from src.core.status import write_status_json
 from src.core.selection import apply_run_selection
 from src.core.updates import notify_if_update_available
 from src.core.notifier import notify
@@ -172,9 +172,9 @@ _CLAIM_JOB_OPTIONS = {
     "max_instances": 1,
     "coalesce": True,
     "misfire_grace_time": 1800,
-    "timeout": 3600,  # 1 hour max per run to prevent hung jobs from blocking scheduler
 }
 _claim_run_lock = asyncio.Lock()
+CLAIM_RUN_TIMEOUT = 3600
 
 
 def _parse_fixed_times(raw: str) -> list[tuple[int, int]]:
@@ -374,13 +374,7 @@ async def run_claimers() -> None:
 
     aggregated_results = []
 
-    run_timing = RunTiming(last_run_started_at=run_started_at)
-    write_status_json(
-        vnc_mode=cfg.vnc_mode,
-        selected_stores=selected,
-        run_state="running",
-        run_timing=run_timing,
-    )
+    write_status_json(selected_stores=selected, run_state="running", started_at=run_started_at)
 
     for key, name, func in claimers:
         try:
@@ -489,13 +483,7 @@ async def run_claimers() -> None:
                 final_msg = "🛑 **DRY RUN SUMMARY: games remaining to be claimed**\n\n" + final_msg
             await notify(final_msg)
 
-    run_timing.last_run_finished_at = datetime.now(timezone.utc)
-    write_status_json(
-        vnc_mode=cfg.vnc_mode,
-        selected_stores=selected,
-        run_state="waiting_for_you" if waiting_for_you() else "idle",
-        run_timing=run_timing,
-    )
+    write_status_json(selected_stores=selected, started_at=run_started_at, finished_at=datetime.now(timezone.utc))
 
     logger.info("✔ Claiming run complete.")
 
@@ -507,7 +495,12 @@ async def run_claimers_scheduled() -> None:
         return
 
     async with _claim_run_lock:
-        await run_claimers()
+        try:
+            # APScheduler 3 has no job timeout; a hung store would otherwise block every later run.
+            async with asyncio.timeout(CLAIM_RUN_TIMEOUT):
+                await run_claimers()
+        except TimeoutError:
+            logger.error("Claiming run exceeded %ds and was cancelled.", CLAIM_RUN_TIMEOUT)
 
 
 async def main() -> None:
@@ -530,12 +523,7 @@ async def main() -> None:
     from src.core.vnc import vnc_manager
     await vnc_manager.initialize()
 
-    write_status_json(
-        vnc_mode=cfg.vnc_mode,
-        selected_stores=_selected_stores(),
-        run_state="waiting_for_you" if waiting_for_you() else "idle",
-        run_timing=RunTiming(),
-    )
+    write_status_json(selected_stores=_selected_stores())
 
     if cfg.reset_db_games:
         try:
@@ -572,13 +560,6 @@ async def main() -> None:
         await notify(test_msg)
         logger.info("✅ Test notification dispatched! Check your configured services. "
                      "Set NOTIFY_TEST=0 in your .env to disable this on future restarts.")
-
-    write_status_json(
-        vnc_mode=cfg.vnc_mode,
-        selected_stores=_selected_stores(),
-        run_state="waiting_for_you" if waiting_for_you() else "idle",
-        run_timing=RunTiming(),
-    )
 
     # If --once flag is set, run a single pass and exit
     if "--once" in sys.argv:

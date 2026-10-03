@@ -19,11 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.gog")
 
-# Timing constants (in seconds) for maintainability
-GOG_PAGE_LOAD_TIMEOUT = 10.0
-GOG_LOGIN_SETTLE_TIME = 4.0
-GOG_ANIMATION_DELAY = 3.0
-GOG_TYPING_DELAY = 0.5
 
 URL_CLAIM = "https://www.gog.com/en"
 

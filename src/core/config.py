@@ -186,7 +186,7 @@ class Config:
     height: int = _int("HEIGHT", 720)
     timeout: int = _int("TIMEOUT", 60) * 1000          # ms
     vnc_login_timeout: int = _int("VNC_LOGIN_TIMEOUT", 180) # seconds
-    vnc_mode: str = _choice("VNC_MODE", ("on", "auto", "off"), "on")
+    vnc_mode: str = _choice("VNC_MODE", ("on", "auto", "off"), "auto")
     vnc_idle_timeout: int = max(0, _int("VNC_IDLE_TIMEOUT", 60))
     novnc_port: str = os.getenv("NOVNC_PORT", "7080")
     vnc_ip: str = os.getenv("VNC_IP", "localhost")

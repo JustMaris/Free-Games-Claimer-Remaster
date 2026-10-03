@@ -6,8 +6,6 @@ from playwright.async_api import BrowserContext, ElementHandle, Page, TimeoutErr
 
 
 class Element:
-    __slots__ = ('_handle',)
-    
     def __init__(self, handle: ElementHandle) -> None:
         self._handle = handle
 
@@ -28,8 +26,6 @@ class Element:
 
 
 class PageAdapter:
-    __slots__ = ('_page',)
-    
     def __init__(self, page: Page) -> None:
         self._page = page
 
@@ -87,8 +83,6 @@ class PageAdapter:
 
 
 class BrowserAdapter:
-    __slots__ = ('context',)
-    
     def __init__(self, context: BrowserContext) -> None:
         self.context = context
 
@@ -101,9 +95,6 @@ class BrowserAdapter:
         adapter = PageAdapter(page)
         await adapter.get(url)
         return adapter
-
-    async def update_targets(self) -> None:
-        return None
 
     async def stop(self) -> None:
         await self.context.close()

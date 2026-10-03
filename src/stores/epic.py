@@ -28,11 +28,7 @@ logger = logging.getLogger("fgc.epic")
 EPIC_PAGE_LOAD_TIMEOUT = 10.0
 EPIC_LOGIN_SETTLE_TIME = 3.0
 EPIC_ANIMATION_DELAY = 3.0
-EPIC_TYPING_DELAY = 0.5
 EPIC_2FA_WAIT_TIME = 3.0
-EPIC_MAX_LOGIN_ATTEMPTS = 3
-EPIC_LOGIN_WAIT_LOOP = 120  # seconds to wait for login to complete
-EPIC_CHALLENGE_SETTLE = 12.0  # seconds to wait for challenge to auto-clear
 
 # URL of Epic's free games page (where we look for available free games)
 URL_CLAIM = "https://store.epicgames.com/en-US/free-games"

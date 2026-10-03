@@ -24,10 +24,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.aliexpress")
 
-# Timing constants (in seconds) for maintainability
-AE_PAGE_LOAD_TIMEOUT = 10.0
-AE_LOGIN_SETTLE_TIME = 3.0
-AE_ANIMATION_DELAY = 2.0
 
 URL_LOGIN = "https://www.aliexpress.com/p/ug-login-page/login.html?fromMsite=true"
 URL_COINS = "https://m.aliexpress.com/p/coin-index/index.html"

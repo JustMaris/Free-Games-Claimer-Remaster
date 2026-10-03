@@ -22,11 +22,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("fgc.fab")
 
-# Timing constants (in seconds) for maintainability
-FAB_PAGE_LOAD_TIMEOUT = 10.0
-FAB_LOGIN_SETTLE_TIME = 3.0
-FAB_ANIMATION_DELAY = 2.0
-FAB_TYPING_DELAY = 0.5
 
 URL_FREE = "https://www.fab.com/limited-time-free?lang=en"
 URL_LISTING = "https://www.fab.com/listings/{uid}"
