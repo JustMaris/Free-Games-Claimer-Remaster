@@ -1161,10 +1161,10 @@ class EpicGamesClaimer(BaseClaimer):
                                 accepted = True
                                 await self.sleep(2)
 
-                    if add_clicked and accepted:
-                        # Once we've clicked Add and explicitly handled Accept, we can wait for verification
-                        # We don't break immediately, let already_done or the timeout push us forward
-                        pass
+                    # Epic puts an hCaptcha in the checkout frame after "I accept"; only a human can clear it.
+                    if add_clicked and await self._human_challenge_present():
+                        if not await self._wait_out_challenge(f"Epic checkout ({title})", store_key="epic"):
+                            break
 
                     already_done = await self.page.evaluate(
                         """

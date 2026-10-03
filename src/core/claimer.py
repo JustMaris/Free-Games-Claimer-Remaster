@@ -650,6 +650,8 @@ class BaseClaimer:
         """
         if not self.page:
             return False
+        if await self._challenge_frame_visible():
+            return True
         try:
             return bool(await self.page.evaluate(r"""
                 (() => {
@@ -672,6 +674,27 @@ class BaseClaimer:
             """))
         except Exception:
             return False
+
+    _CHALLENGE_FRAME = re.compile(r"hcaptcha\.com/.*frame=challenge|arkoselabs\.com|funcaptcha\.com", re.I)
+
+    async def _challenge_frame_visible(self) -> bool:
+        """A captcha nested in a cross-origin frame (Epic's checkout) never shows up in the DOM check.
+
+        hCaptcha keeps its challenge frame loaded but parked off-screen, so only an on-screen one counts.
+        """
+        raw = getattr(self.page, "_page", None)
+        if raw is None:
+            return False
+        for frame in raw.frames:
+            if not self._CHALLENGE_FRAME.search(frame.url or ""):
+                continue
+            try:
+                box = await (await frame.frame_element()).bounding_box()
+            except Exception:
+                continue
+            if box and box["width"] > 100 and box["height"] > 100 and box["x"] >= 0 and box["y"] >= 0:
+                return True
+        return False
 
     async def _wait_out_challenge(self, label: str, settle: int = 12, store_key: str | None = None) -> bool:
         """Clear a human-check: let it auto-pass, else alert the user to solve via VNC.
