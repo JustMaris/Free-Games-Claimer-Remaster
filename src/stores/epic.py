@@ -1147,17 +1147,7 @@ class EpicGamesClaimer(BaseClaimer):
                     if iframe:
                         # Check "Add to library" inside iframe
                         if not add_clicked:
-                            did_add = await self._eval_in_frame(iframe, """
-                                (() => {
-                                    const btns = [...document.querySelectorAll('button')];
-                                    const btn = btns.find(b => {
-                                        const t = (b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-                                        return t.includes('add to library');
-                                    });
-                                    if (btn) { btn.click(); return true; }
-                                    return false;
-                                })()
-                            """)
+                            did_add = await self._click_in_frame(iframe, r"add to library")
                             if did_add:
                                 logger.debug("✓ Found and clicked 'Add to library' inside iframe.")
                                 add_clicked = True
@@ -1165,17 +1155,7 @@ class EpicGamesClaimer(BaseClaimer):
 
                         # Check "I accept" inside iframe
                         if not accepted:
-                            did_accept = await self._eval_in_frame(iframe, """
-                                (() => {
-                                    const btns = [...document.querySelectorAll('button')];
-                                    const btn = btns.find(b => {
-                                        const t = (b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-                                        return t.includes('i accept') || t.includes('i agree');
-                                    });
-                                    if (btn) { btn.click(); return true; }
-                                    return false;
-                                })()
-                            """)
+                            did_accept = await self._click_in_frame(iframe, r"i accept|i agree")
                             if did_accept:
                                 logger.debug("✓ Found and clicked 'I accept' inside iframe.")
                                 accepted = True
@@ -1251,6 +1231,12 @@ class EpicGamesClaimer(BaseClaimer):
                 await self.sleep(1)
 
             logger.warning("No confirmation found after checkout for '%s'.", title)
+            await self.take_screenshot(f"epic_checkout_{title[:20]}")
+            iframe = self._find_purchase_frame()
+            if iframe:
+                buttons = await self._eval_in_frame(
+                    iframe, "[...document.querySelectorAll('button')].map(b => b.innerText.trim()).filter(Boolean)")
+                logger.debug("Checkout frame %s buttons: %s", iframe.url[:80], buttons)
             return False
 
         except Exception:
@@ -1483,6 +1469,18 @@ class EpicGamesClaimer(BaseClaimer):
             ):
                 return frame
         return None
+
+    async def _click_in_frame(self, frame, pattern: str) -> bool:
+        """Real mouse click on a button in a (cross-origin) frame; a JS .click() there is an untrusted event."""
+        try:
+            button = frame.get_by_role("button", name=re.compile(pattern, re.I)).first
+            if not await button.count():
+                return False
+            await button.click(timeout=3000)
+            return True
+        except Exception as exc:
+            logger.debug("Frame click on /%s/ failed: %s", pattern, exc)
+            return False
 
     async def _eval_in_frame(self, frame, expression: str):
         """Evaluate JavaScript in a specific Playwright frame."""
