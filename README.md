@@ -8,6 +8,8 @@
 >
 > ℹ️ **Are you coming from the original Node.js version?**  
 > For a comprehensive, file-by-file breakdown of what changed, dropped features, stealth automation upgrades, and architectural differences, **please read [MODIFICATIONS.md](./MODIFICATIONS.md).**
+>
+> Open questions about this fork (browser engine, memory, VNC) are tracked in [docs/investigations.md](./docs/investigations.md).
 
 Automatically claims free games on:
 
@@ -103,6 +105,8 @@ docker compose up -d
 
 Open **http://localhost:7080** in your browser to access the VNC session.
 
+With the default `VNC_MODE=auto`, that port shows a small status page until a store actually needs you; noVNC starts then. Set `VNC_MODE=on` to keep noVNC up all the time.
+
 Each store will wait for you to login manually on the first run if you don't supply credentials.
 After that, session cookies are natively restored using persistent browser profiles!
 
@@ -140,7 +144,7 @@ Options are set via environment variables in `.env`:
 | `RUN_ON_STARTUP` | `true` | Run once immediately when the container/application starts. |
 | `VNC_LOGIN_TIMEOUT`| `180` | Seconds the bot waits for **you** at any manual step: signing in, a code from e-mail or SMS, approving 2FA, a captcha, or Unity's checkout form. A window nobody answers ends that one store's manual steps for the rest of the run, and the summary says what it skipped. Raise it if you are not usually sitting at the computer. |
 | `TIMEOUT` | `60` | Advanced: seconds to wait for a page element before giving up. |
-| `VNC_MODE` | `on` | Whether to expose noVNC: `on` = always, `auto` = only when a manual step is needed (stops after `VNC_IDLE_TIMEOUT`), `off` = never. |
+| `VNC_MODE` | `auto` | Whether to expose noVNC: `on` = always, `auto` = only when a manual step is needed (stops after `VNC_IDLE_TIMEOUT`), `off` = never. |
 | `VNC_IDLE_TIMEOUT` | `60` | Seconds to keep VNC running after the manual step is completed (only with `VNC_MODE=auto`). |
 | `BROWSER_EXECUTABLE` | | Path to the Chromium executable. Leave blank to use the system default. |
 | `BROWSER_CACHE_DIR` | *(empty)* | Where Chromium stores its disk cache. Empty = default in-memory cache (fast, uses RAM). Set to a path on the data volume to push cache to disk (slower I/O, lower RAM). On NVMe this is a good trade-off. |
@@ -366,7 +370,6 @@ free-games-claimer-remaster/
 ├── src/
 │   ├── version.py          # Version string
 │   ├── core/               # Shared engine components
-│   │   ├── browser.py      # Playwright compatibility adapters
 │   │   ├── claimer.py      # BaseClaimer: browser launch, login waits, notifications
 │   │   ├── config.py       # Typed configuration loader (.env → Python)
 │   │   ├── display.py      # On-demand Xvfb manager

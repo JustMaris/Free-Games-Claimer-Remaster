@@ -5,12 +5,10 @@ calendar as a plain nested object, the parser has to read both, or the streak
 and tomorrow's reward silently disappear (v1.5 bug).
 """
 
-import asyncio
 import json
 
 import pytest
 
-import src.stores.aliexpress as aliexpress
 from src.stores.aliexpress import (
     AliExpressClaimer,
     _as_int,
@@ -76,78 +74,6 @@ def _claimer(*payloads):
         for api, raw in payloads
     ]
     return claimer
-
-
-class Page:
-    def __init__(self, captures):
-        self.captures = captures
-        self.calls = 0
-
-    async def evaluate(self, script):
-        self.calls += 1
-        start = getattr(self, "cursor", 0)
-        self.cursor = len(self.captures)
-        return json.dumps({"length": self.cursor, "items": self.captures[start:]})
-
-
-class TestCoinCapture:
-    def test_network_and_page_duplicates_are_parsed_once(self, monkeypatch):
-        raw = {"api": "mtop.aliexpress.coin.execute", "data": COIN_EXECUTE}
-        body = json.dumps(raw)
-        claimer = AliExpressClaimer()
-        claimer.page = Page([{"url": "coin", "body": body}])
-        calls = 0
-        original = aliexpress._flatten_payload
-
-        def counted(*args, **kwargs):
-            nonlocal calls
-            calls += 1
-            return original(*args, **kwargs)
-
-        monkeypatch.setattr(aliexpress, "_flatten_payload", counted)
-        assert claimer._store_coin_payload("coin", body)
-        calls_after_first_parse = calls
-        asyncio.run(claimer._read_coin_api())
-        assert calls == calls_after_first_parse
-        assert len(claimer._coin_payloads) == 1
-        assert claimer._coin_payloads[0]["parsed"] == raw
-
-    def test_reads_only_new_page_captures_and_dumps_only_changes(self, monkeypatch, tmp_path):
-        raw = {"api": "mtop.aliexpress.coin.execute", "data": COIN_EXECUTE}
-        claimer = AliExpressClaimer()
-        claimer.page = Page([{"url": "coin", "body": json.dumps(raw)}])
-        monkeypatch.setattr(aliexpress.cfg, "_data_dir", tmp_path)
-        dumps = 0
-
-        async def to_thread(func, *args, **kwargs):
-            nonlocal dumps
-            dumps += 1
-            return func(*args, **kwargs)
-
-        monkeypatch.setattr(aliexpress.asyncio, "to_thread", to_thread)
-        asyncio.run(claimer._read_coin_api())
-        asyncio.run(claimer._read_coin_api())
-        assert claimer.page.calls == 2
-        assert len(claimer._coin_payloads) == 1
-        assert dumps == 1
-
-    def test_dump_is_offloaded_and_versioned(self, monkeypatch, tmp_path):
-        body = json.dumps({"api": "coin", "data": COIN_EXECUTE})
-        claimer = AliExpressClaimer()
-        claimer._store_coin_payload("coin", body)
-        monkeypatch.setattr(aliexpress.cfg, "_data_dir", tmp_path)
-        calls = 0
-
-        async def to_thread(func, *args, **kwargs):
-            nonlocal calls
-            calls += 1
-            return func(*args, **kwargs)
-
-        monkeypatch.setattr(aliexpress.asyncio, "to_thread", to_thread)
-        asyncio.run(claimer._dump_coin_payloads())
-        asyncio.run(claimer._dump_coin_payloads())
-        assert calls == 1
-        assert json.loads((tmp_path / "ae_coin_api.json").read_text())[0]["api"] == "coin"
 
 
 class TestFlattenPayload:

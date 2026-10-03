@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import pyotp
+import nodriver as uc
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS, now_str
@@ -14,16 +14,7 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.gog")
-
-# Timing constants (in seconds) for maintainability
-GOG_PAGE_LOAD_TIMEOUT = 10.0
-GOG_LOGIN_SETTLE_TIME = 4.0
-GOG_ANIMATION_DELAY = 3.0
-GOG_TYPING_DELAY = 0.5
 
 URL_CLAIM = "https://www.gog.com/en"
 
@@ -31,7 +22,7 @@ URL_CLAIM = "https://www.gog.com/en"
 class GOGClaimer(BaseClaimer):
     store_name = "gog"
 
-    async def run(self, extra_games: list[GameDict] | None = None) -> None:
+    async def run(self, extra_games: list | None = None) -> None:
         """Main entry point for the GOG claiming flow."""
         # GOG's claimer takes no URL, it claims whatever giveaway gog.com is running, so a
         # GamerPower find here only means there is a reason to look.
@@ -107,7 +98,27 @@ class GOGClaimer(BaseClaimer):
             2. Look for a username displayed anywhere on the page
             3. Check if a "Sign in" link exists (means NOT logged in)
             4. Check if an avatar image exists (means logged in)
+
+            GOG's own /userData.json decides first: the page heuristics once read a generic
+            "Account" label as a username, so a dead session looked signed in and every claim
+            came back "Unauthorized".
             """
+            try:
+                api_raw = await self.page.evaluate(
+                    "fetch('/userData.json', {credentials: 'include'}).then(r => r.text())",
+                    await_promise=True,
+                )
+                api = json.loads(api_raw) if isinstance(api_raw, str) else {}
+            except Exception as exc:
+                logger.debug("userData.json unavailable, falling back to page checks: %s", exc)
+                api = {}
+            if isinstance(api, dict) and "isLoggedIn" in api:
+                logger.debug("Login check (userData.json): isLoggedIn=%s", api["isLoggedIn"])
+                if api["isLoggedIn"]:
+                    self.user = api.get("username") or "GOG User"
+                    return True
+                return False
+
             result_raw = await self.page.evaluate(
                 """
                 JSON.stringify((() => {

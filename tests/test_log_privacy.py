@@ -102,3 +102,12 @@ class TestNoCodeReachesTheLog:
             for node in ast.walk(arg):
                 if isinstance(node, ast.Name):
                     assert node.id.lower() not in banned, path.name
+
+
+def test_http_libraries_that_log_token_urls_stay_quiet_under_debug():
+    # Apprise sends Telegram through requests/urllib3, which log POST /bot<token>/sendMessage at DEBUG.
+    tree = ast.parse((ROOT / "main.py").read_text("utf-8"))
+    noisy = next(node.value for node in ast.walk(tree)
+                 if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "NOISY_LIBRARIES")
+    names = {elt.value for elt in noisy.elts}
+    assert {"urllib3", "requests", "httpx", "httpcore", "apprise"} <= names

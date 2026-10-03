@@ -86,7 +86,8 @@ async def send_apprise(message: str, *, title: str | None = None) -> None:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
-        lambda: ap.notify(body=message, title=title or "Free Games Claimer"),
+        # Messages are written in markdown (Discord); Apprise converts it per service.
+        lambda: ap.notify(body=message, title=title or "Free Games Claimer", body_format=apprise.NotifyFormat.MARKDOWN),
     )
     # debug, not info: apprise already logs each target, avoids a duplicate-looking line.
     logger.debug("Apprise notification sent.")
