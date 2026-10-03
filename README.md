@@ -370,7 +370,6 @@ free-games-claimer-remaster/
 ├── src/
 │   ├── version.py          # Version string
 │   ├── core/               # Shared engine components
-│   │   ├── browser.py      # Playwright compatibility adapters
 │   │   ├── claimer.py      # BaseClaimer: browser launch, login waits, notifications
 │   │   ├── config.py       # Typed configuration loader (.env → Python)
 │   │   ├── display.py      # On-demand Xvfb manager

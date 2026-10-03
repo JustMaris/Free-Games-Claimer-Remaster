@@ -14,14 +14,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **`VNC_MODE` defaults to `auto`** everywhere. The image already set it; config, README and `.env.example` said `on`.
-- **The engine is patchright**, a drop-in Playwright build that patches the `Runtime.enable` and binding leaks anti-bot checks look for. See `docs/investigations.md` for the measurement plan.
+- **Back on nodriver, with Google Chrome on amd64.** The fork's move to Playwright (and then patchright) got an hCaptcha in Epic's checkout iframe on every claim: 0 unattended Epic claims from Oct 1 to Oct 3. On the same account and profile, upstream v1.9 (nodriver with Chrome) claimed the same pending games unattended. The fork keeps its engine-independent changes: on-demand Xvfb and VNC, status page, CI, Docker slimming, alert fixes. `--restore-last-session` is back too, so GOG sessions survive restarts again.
+- **Epic checkout captcha hands over to VNC**: an on-screen hCaptcha inside the cross-origin purchase frame is now detected, and you get the usual alert instead of a silent timeout.
 - **CI runs the test suite** on Python 3.14 (the image's version) whenever Python files change. PR images are built by `docker-ghcr.yml`, so the duplicate `docker-pr-build.yml` is gone.
 - **Docker resource limits**: CPU (2) and memory (4GB) limits in `docker-compose.yml`.
-- Lazy-loaded `playwright.async_api` inside `start_browser()`.
 - `close_browser()` also sweeps orphaned Chromium processes tied to the store's profile.
 
 ### Removed
-- Unused timing constants in store modules, unused `TypedDict`s in `src/types.py`, the no-op GPU-flag filter, and the duplicate compose healthcheck.
+- Unused timing constants in store modules, `src/types.py`, the no-op GPU-flag filter, and the duplicate compose healthcheck.
 
 ## [1.9] - 2026-09-11
 

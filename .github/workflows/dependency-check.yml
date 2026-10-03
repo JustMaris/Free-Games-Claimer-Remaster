@@ -69,6 +69,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
+      # Same patch as the Dockerfile: nodriver 0.50.3 has a non-UTF-8 byte Python 3.12+ won't import.
+      - name: Patch nodriver for Python 3.12+
+        run: python -c "import importlib.util as u, pathlib as p; f = p.Path(u.find_spec('nodriver').submodule_search_locations[0], 'cdp', 'network.py'); f.write_bytes(f.read_bytes().replace(b'\xb1Inf', b'+-Inf'))"
+
       - name: Check installed package metadata
         run: python -m pip check
 

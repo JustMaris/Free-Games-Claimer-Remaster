@@ -31,7 +31,7 @@ summary.print_(sum1)
 - Large dictionaries/lists that aren't needed
 - Cached data that grows unbounded
 - SQLAlchemy session objects
-- Playwright context references
+- Chrome/nodriver tab references
 
 ---
 
@@ -116,7 +116,7 @@ pip install pympler memory_profiler psutil
 Based on the codebase, **most likely culprits** for further memory gains:
 
 1. **SQLAlchemy session objects** - Are sessions properly closed after database operations?
-2. **Playwright contexts** - Are browser contexts fully cleaned up? (`_sweep_orphan_chrome` should handle this)
+2. **Chrome processes** - Is each store's browser fully cleaned up? (`_sweep_orphan_chrome` should handle this)
 3. **Cached game data** - Does `aggregated_results` or similar grow unbounded?
 4. **Store instances** - Are claimer objects kept alive unnecessarily?
 
@@ -125,6 +125,6 @@ Based on the codebase, **most likely culprits** for further memory gains:
 ## Notes
 
 - Current memory: **142MB idle** (down from 175MB)
-- Normal for Playwright + Python
+- Normal for Chrome + Python
 - Further gains would require identifying specific leaks via profiling
 - The 142MB is already quite lean for this type of application

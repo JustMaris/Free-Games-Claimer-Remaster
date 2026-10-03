@@ -10,9 +10,9 @@ import json
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
-from typing import TYPE_CHECKING
 
 import httpx
+import nodriver as uc
 import pyotp
 
 from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS
@@ -20,11 +20,7 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.ubisoft")
-
 
 URL_FREE = "https://www.ubisoft.com/en-us/games/free"
 URL_ACCOUNT = "https://account.ubisoft.com/en-US/account-information"
@@ -614,17 +610,44 @@ class UbisoftClaimer(BaseClaimer):
     # Ubisoft Connect overlay (a cross-origin iframe)
     # ------------------------------------------------------------------
 
-    async def _overlay_frame(self):
-        """The overlay's cross-origin frame."""
-        for frame in self.page._page.frames:
-            if frame != self.page._page.main_frame and OVERLAY_PATH in frame.url:
-                return frame
+    def _walk_nodes(self, node):
+        """Every node of a pierced DOM tree, iframe documents included."""
+        yield node
+        for child in (node.children or []):
+            yield from self._walk_nodes(child)
+        content = getattr(node, "content_document", None)
+        if content is not None:
+            yield from self._walk_nodes(content)
+
+    @staticmethod
+    def _node_attrs(node) -> dict:
+        raw = node.attributes or []
+        return {raw[i]: raw[i + 1] for i in range(0, len(raw) - 1, 2)}
+
+    async def _overlay_document(self):
+        """The overlay's document, reachable only by piercing the cross-origin iframe."""
+        try:
+            doc = await self.page.send(uc.cdp.dom.get_document(depth=-1, pierce=True))
+        except Exception as exc:
+            logger.debug("Could not read the pierced DOM: %s", exc)
+            return None
+        for node in self._walk_nodes(doc):
+            if node.node_name == "IFRAME" and OVERLAY_PATH in self._node_attrs(node).get("src", ""):
+                return getattr(node, "content_document", None)
         return None
 
-    async def _overlay_eval(self, frame, function_declaration: str):
+    async def _overlay_eval(self, document, function_declaration: str):
         """Run JS inside the overlay iframe, the parent document cannot reach into it."""
         try:
-            raw = await frame.evaluate(f"({function_declaration}).call(document)")
+            handle = await self.page.send(uc.cdp.dom.resolve_node(node_id=document.node_id))
+            result = await self.page.send(uc.cdp.runtime.call_function_on(
+                function_declaration=function_declaration,
+                object_id=handle.object_id,
+                return_by_value=True,
+            ))
+            if isinstance(result, tuple):
+                result = result[0]
+            raw = getattr(result, "value", None)
             return json.loads(raw) if isinstance(raw, str) else raw
         except Exception as exc:
             logger.debug("Could not evaluate inside the Ubisoft Connect overlay: %s", exc)
@@ -632,18 +655,18 @@ class UbisoftClaimer(BaseClaimer):
 
     async def _confirm_account_overlay(self) -> str:
         """Answer the 'Welcome back, continue?' overlay. Returns 'none', 'confirmed' or 'login'."""
-        frame = await self._overlay_frame()
-        if frame is None:
+        document = await self._overlay_document()
+        if document is None:
             return "none"
 
-        state = await self._overlay_eval(frame, OVERLAY_STATE_JS) or {}
+        state = await self._overlay_eval(document, OVERLAY_STATE_JS) or {}
         logger.debug("Ubisoft Connect overlay: %r", (state.get("text") or "")[:200])
 
         if state.get("inputs"):
             logger.debug("The overlay is asking for credentials, the site session did not carry over.")
             return "login"
 
-        if await self._overlay_eval(frame, OVERLAY_CONTINUE_JS):
+        if await self._overlay_eval(document, OVERLAY_CONTINUE_JS):
             logger.debug("Confirmed the account in the Ubisoft Connect overlay.")
             return "confirmed"
 

@@ -76,7 +76,7 @@ logger = logging.getLogger("fgc")
 # HTTP handshake, every SQLite call. DEBUG=true is about the bot, DEBUG_LIBS about these.
 # urllib3/requests also log full request URLs, and Apprise puts tokens in them (Telegram).
 NOISY_LIBRARIES = (
-    "patchright", "websockets", "httpx", "httpcore", "urllib3", "requests",
+    "nodriver", "uc", "websockets", "httpx", "httpcore", "urllib3", "requests",
     "aiosqlite", "sqlalchemy", "apscheduler", "tzlocal", "asyncio", "apprise",
 )
 if not cfg.debug_libs:

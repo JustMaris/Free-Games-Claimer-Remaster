@@ -26,9 +26,9 @@ import re
 from pathlib import Path
 from datetime import datetime, timezone
 
+import nodriver as uc
 import pyotp
 
-from src.core.browser import BrowserAdapter, Element, PageAdapter
 from src.core.config import cfg
 from src.core.display import display_manager
 from src.core.run_state import mark_answered, mark_unanswered, waits_for_nobody
@@ -50,9 +50,28 @@ def mask_account(name) -> str:
     return f"{local[:1]}***@{domain}"
 
 
-async def open_first_tab(browser, url: str = "about:blank"):
-    """Return the first Playwright page, creating one when needed."""
-    return await browser.get(url, new_tab=not browser.tabs)
+async def open_first_tab(browser, url: str = "about:blank", attempts: int = 10, delay: float = 1.0):
+    """Hand back a usable tab, even when Chrome has not registered one yet (issue #38).
+
+    nodriver reads the target list once at startup, so a slow first tab crashes its get().
+    """
+    for _ in range(attempts):
+        if browser.tabs:
+            try:
+                return await browser.get(url)
+            except RuntimeError as exc:
+                # StopIteration inside a coroutine: the tab list changed between the check and the call.
+                logger.debug("First tab went away before it could be used: %s", exc)
+        if delay:
+            await asyncio.sleep(delay)
+        await browser.update_targets()
+    logger.debug("Chrome still has no page target, asking for a fresh tab.")
+    try:
+        return await browser.get(url, new_tab=True)
+    except Exception as exc:
+        # "no browser is open": there is no window to put a tab in, so open one.
+        logger.debug("New tab refused (%s), opening a window instead.", exc)
+        return await browser.get(url, new_window=True)
 
 
 def filenamify(s: str) -> str:
@@ -85,10 +104,9 @@ class BaseClaimer:
         return logging.getLogger(f"fgc.{self.store_name}")
 
     def __init__(self) -> None:
-        self._playwright = None
         self._display_leased = False
-        self.browser: BrowserAdapter | None = None
-        self.page: PageAdapter | None = None
+        self.browser: uc.Browser | None = None
+        self.page: uc.Tab | None = None
         self.user: str | None = None
         self.notify_games: list[dict] = []
 
@@ -98,12 +116,6 @@ class BaseClaimer:
 
     # Stealth JS injected BEFORE every page load via CDP
     # (addScriptToEvaluateOnNewDocument ensures it runs before any site JS)
-    _PLAYWRIGHT_INIT_JS = """
-    if (navigator.webdriver === true) {
-        Object.defineProperty(navigator, 'webdriver', { configurable: true, get: () => false });
-    }
-    """
-
     _STEALTH_JS = """
     // navigator.webdriver: only patch when truly true, and spoof false (real Chrome never reports undefined).
     if (navigator.webdriver === true) {
@@ -192,8 +204,8 @@ class BaseClaimer:
         *,
         force_headful: bool = False,
         extra_args: list[str] | None = None,
-    ) -> BrowserAdapter:
-        """Launch a Playwright Chromium instance with a persistent profile.
+    ) -> uc.Browser:
+        """Launch a nodriver browser instance with full stealth.
 
         Args:
             force_headful: If True, always run with a visible window
@@ -215,7 +227,6 @@ class BaseClaimer:
             prefs = {}
             if prefs_file.exists():
                 prefs = _json.loads(prefs_file.read_text(encoding="utf-8"))
-            original = _json.dumps(prefs, sort_keys=True)
             prefs["credentials_enable_service"] = False
             prefs["credentials_enable_autosignin"] = False
             prefs.setdefault("profile", {})
@@ -240,25 +251,39 @@ class BaseClaimer:
                 "tmall": True,
                 "taobao": True,
             }
-            if _json.dumps(prefs, sort_keys=True) != original:
-                prefs_file.write_text(_json.dumps(prefs), encoding="utf-8")
+            prefs_file.write_text(_json.dumps(prefs), encoding="utf-8")
         except Exception as e:
             self.logger.debug("Failed to seed Chrome preferences: %s", e)
 
         # Remove stale singleton lock files that a crashed instance leaves behind (session data untouched).
         self._clear_profile_locks(store_browser_dir)
 
-        chrome_path = cfg.browser_executable or shutil.which("chromium") or shutil.which("chromium-browser")
-        self.logger.debug("Chromium: %s", chrome_path)
+        # Auto-detect chrome binary
+        chrome_path = (
+            cfg.browser_executable
+            or shutil.which("google-chrome-stable")
+            or shutil.which("google-chrome")
+            or shutil.which("chromium-browser")
+            or shutil.which("chromium")
+        )
+        self.logger.debug("Chrome: %s", chrome_path)
+
         headless = False if force_headful else (not cfg.show)
+
+        # --- Browser args ---
+        # IMPORTANT: Do NOT add `--disable-blink-features=AutomationControlled`
+        # nodriver already handles this internally, and the flag itself is a
+        # well-known signal that sophisticated anti-bot systems detect.
         args = [
             f"--window-size={cfg.width},{cfg.height}",
             "--hide-crash-restore-bubble",
+            "--restore-last-session",
             "--lang=en-US",
-            "--disable-dev-shm-usage",
-            "--disable-smooth-scrolling",
-            "--disable-extensions",
-            "--mute-audio",
+            "--accept-lang=en-US,en",  # no q-values: Chrome copies this into navigator.languages
+            "--disable-dev-shm-usage",     # Docker shared memory fix
+            "--disable-smooth-scrolling",  # CPU optimization
+            "--disable-extensions",        # CPU optimization
+            "--mute-audio",                # CPU optimization
             "--disable-background-networking",
             "--disable-background-timer-throttling",
             "--disable-backgrounding-occluded-windows",
@@ -273,56 +298,77 @@ class BaseClaimer:
             "--password-store=basic",
             "--use-mock-keychain",
         ]
+        # Only disable GPU when running headless (non-Epic).
+        # For headful mode (Epic), GPU must stay enabled so that WebGL reports
+        # hardware-accelerated rendering, which is checked by hCaptcha/anti-bot.
         if cfg.browser_cache_dir:
             args.append(f"--disk-cache-dir={cfg.browser_cache_dir}")
         args.append("--js-flags=--max-old-space-size=512")
         if not force_headful:
             args.append("--disable-gpu")
+
         if extra_args:
             args.extend(extra_args)
 
-
+        # Launch with retries; sweep orphaned Chrome + locks between attempts (issue #19).
         launch_error: Exception | None = None
         for attempt in range(1, 4):
             try:
+                # Xvfb only runs while a visible browser needs it.
                 if not headless and not self._display_leased:
                     await display_manager.acquire()
                     self._display_leased = True
-                from patchright.async_api import async_playwright
-                self._playwright = await async_playwright().start()
-                context = await self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(store_browser_dir),
-                    executable_path=chrome_path,
+                self.browser = await uc.start(
                     headless=headless,
-                    args=args,
-                    ignore_default_args=["--enable-automation"],
-                    locale="en-US",
-                    chromium_sandbox=False,
+                    sandbox=False,  # required when running as root in Docker
+                    browser_executable_path=chrome_path,
+                    browser_args=args,
+                    user_data_dir=str(store_browser_dir),
                 )
-                self.browser = BrowserAdapter(context)
-                raw_page = context.pages[0] if context.pages else await context.new_page()
-                self.page = PageAdapter(raw_page)
-                await context.add_init_script(self._PLAYWRIGHT_INIT_JS)
-                if self.inject_base_stealth:
-                    await context.add_init_script(self._STEALTH_JS)
-                self.logger.debug("Chromium started (headless=%s, profile=%s, extra args=%s)",
+                self.logger.debug("Chrome started (headless=%s, profile=%s, extra args=%s)",
                                   headless, store_browser_dir, extra_args or [])
+                # A missing first tab is a launch failure too, so it gets the same sweep and retry.
+                self.page = await open_first_tab(self.browser)
                 launch_error = None
                 break
             except Exception as e:
                 launch_error = e
-                self.logger.warning("Chromium launch attempt %d/3 failed: %s", attempt, e)
+                self.logger.warning("Chrome launch attempt %d/3 failed: %s", attempt, e)
                 await self.close_browser()
-                await asyncio.to_thread(self._sweep_orphan_chrome, store_browser_dir)
+                self._sweep_orphan_chrome(store_browser_dir)
                 self._clear_profile_locks(store_browser_dir)
                 if attempt < 3:
                     await asyncio.sleep(2 * attempt)
-                    continue
         if launch_error is not None:
-            await asyncio.to_thread(self._log_launch_diagnostics, store_browser_dir, chrome_path)
+            self._log_launch_diagnostics(store_browser_dir, chrome_path)
             raise RuntimeError(
-                f"Chromium failed to start after 3 attempts (a container restart may help): {launch_error}"
+                f"Chrome failed to start after 3 attempts (a container restart may help): {launch_error}"
             ) from launch_error
+
+        # --- Inject stealth patches via CDP (runs BEFORE any page JS) ---
+        # Unlike page.evaluate(), addScriptToEvaluateOnNewDocument ensures
+        # our patches are active when the WAF/anti-bot first evaluates the
+        # browser fingerprint on navigation.
+        try:
+            # Page domain MUST be enabled first, else addScriptToEvaluateOnNewDocument is silently ignored.
+            await self.page.send(uc.cdp.page.enable())
+            if self.inject_base_stealth:
+                await self.page.send(
+                    uc.cdp.page.add_script_to_evaluate_on_new_document(
+                        source=self._STEALTH_JS,
+                    )
+                )
+                self.logger.debug("Stealth JS injected via CDP.")
+            else:
+                self.logger.debug(
+                    "Base stealth JS skipped (store injects its own fingerprint)."
+                )
+        except Exception:
+            # Fallback: inject directly on current page
+            self.logger.debug("CDP injection failed, using evaluate fallback.")
+            if self.inject_base_stealth:
+                await self.page.evaluate(self._STEALTH_JS)
+
         self.log_browser_ready()
         return self.browser
 
@@ -342,29 +388,21 @@ class BaseClaimer:
         self.logger.info("🔓 [bold green]Signed in as:[/bold green] %s", mask_account(user))
 
     async def close_browser(self) -> None:
-        """Close the browser context and Playwright driver."""
+        """Close the browser and kill its whole process tree (issue #19), then free the display."""
         if self.browser:
+            pid = getattr(self.browser, "_process_pid", None) \
+                or getattr(getattr(self.browser, "_process", None), "pid", None)
             try:
-                await self.browser.stop()
+                self.browser.stop()
             except Exception as e:
                 self.logger.debug("browser.stop() raised (ignored): %s", e)
-        if self._playwright:
-            try:
-                await self._playwright.stop()
-            except Exception as e:
-                self.logger.debug("playwright.stop() raised (ignored): %s", e)
-        self._playwright = None
-        self.browser = None
-        self.page = None
+            # stop() only ends the parent; kill leftover children so they can't pile up.
+            self._kill_process_tree(pid)
+            self.browser = None
+            self.page = None
         if self._display_leased:
             await display_manager.release()
             self._display_leased = False
-        # Additional cleanup: sweep orphaned Chrome processes for this profile
-        try:
-            store_browser_dir = cfg.browser_dir / (self.profile_name or self.store_name)
-            await asyncio.to_thread(self._sweep_orphan_chrome, store_browser_dir)
-        except Exception as e:
-            self.logger.debug("Failed to sweep orphaned Chrome processes: %s", e)
 
     def _log_launch_diagnostics(self, profile_dir: Path, chrome_path: str | None) -> None:
         """Say what the machine looked like when Chrome refused to start, so a bug report can be answered."""
@@ -378,7 +416,7 @@ class BaseClaimer:
         except Exception as exc:
             free = f"unknown ({exc})"
 
-        version = "not checked"
+        version = "not checked, nodriver picked the binary"
         if chrome_path:
             try:
                 done = subprocess.run([chrome_path, "--version"], capture_output=True, text=True, timeout=15)
@@ -386,7 +424,8 @@ class BaseClaimer:
             except Exception as exc:
                 version = f"could not run it ({exc})"
 
-        startup = "not attempted"
+        # nodriver swallows Chrome's own output, and that is where the real reason lives.
+        startup = "not attempted, nodriver picked the binary"
         if chrome_path:
             try:
                 done = subprocess.run(
@@ -496,7 +535,7 @@ class BaseClaimer:
     # Utilities
     # ------------------------------------------------------------------
 
-    async def wait_for(self, selector: str, timeout: int | None = None) -> Element | None:
+    async def wait_for(self, selector: str, timeout: int | None = None) -> uc.Element | None:
         """Wait for an element matching the CSS selector to appear."""
         timeout = timeout or (cfg.timeout // 1000)
         try:
@@ -650,8 +689,6 @@ class BaseClaimer:
         """
         if not self.page:
             return False
-        if await self._challenge_frame_visible():
-            return True
         try:
             return bool(await self.page.evaluate(r"""
                 (() => {
@@ -674,27 +711,6 @@ class BaseClaimer:
             """))
         except Exception:
             return False
-
-    _CHALLENGE_FRAME = re.compile(r"hcaptcha\.com/.*frame=challenge|arkoselabs\.com|funcaptcha\.com", re.I)
-
-    async def _challenge_frame_visible(self) -> bool:
-        """A captcha nested in a cross-origin frame (Epic's checkout) never shows up in the DOM check.
-
-        hCaptcha keeps its challenge frame loaded but parked off-screen, so only an on-screen one counts.
-        """
-        raw = getattr(self.page, "_page", None)
-        if raw is None:
-            return False
-        for frame in raw.frames:
-            if not self._CHALLENGE_FRAME.search(frame.url or ""):
-                continue
-            try:
-                box = await (await frame.frame_element()).bounding_box()
-            except Exception:
-                continue
-            if box and box["width"] > 100 and box["height"] > 100 and box["x"] >= 0 and box["y"] >= 0:
-                return True
-        return False
 
     async def _wait_out_challenge(self, label: str, settle: int = 12, store_key: str | None = None) -> bool:
         """Clear a human-check: let it auto-pass, else alert the user to solve via VNC.

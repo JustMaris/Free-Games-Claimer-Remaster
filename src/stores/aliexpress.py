@@ -6,12 +6,13 @@ undetected, and reads the coin balance from the mtop API rather than the DOM.
 
 from __future__ import annotations
 
-import asyncio
+import base64
 import json
 import logging
 import random
 import re
-from typing import TYPE_CHECKING
+
+import nodriver as uc
 
 from browserforge.fingerprints import FingerprintGenerator
 from browserforge.injectors.utils import InjectFunction
@@ -19,11 +20,7 @@ from browserforge.injectors.utils import InjectFunction
 from src.core.claimer import BaseClaimer
 from src.core.config import cfg
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.aliexpress")
-
 
 URL_LOGIN = "https://www.aliexpress.com/p/ug-login-page/login.html?fromMsite=true"
 URL_COINS = "https://m.aliexpress.com/p/coin-index/index.html"
@@ -224,13 +221,6 @@ def page_is_dead(health: dict) -> bool:
     return inner <= DEAD_PAGE_RENDERED_MAX and source >= DEAD_PAGE_SOURCE_MIN
 
 
-def _payload_data(payload: dict) -> object:
-    parsed = payload.get("parsed")
-    if parsed is not None:
-        return parsed
-    return json.loads(payload["body"])
-
-
 def today_from_payloads(payloads) -> dict:
     """Today's check-in as the API reports it, which no translation can change.
 
@@ -238,11 +228,11 @@ def today_from_payloads(payloads) -> dict:
     carries ``signSuccess`` and today's coin prize.
     """
     out: dict = {"claimed": None, "coins": None}
-    for payload in reversed(payloads or []):
+    for payload in payloads or []:
         if "sign.list" not in str((payload or {}).get("api") or ""):
             continue
         try:
-            data = (_payload_data(payload).get("data") or {}).get("data") or {}
+            data = (json.loads(payload["body"]).get("data") or {}).get("data") or {}
             nodes = [n for seq in (data.get("signQuerySequenceNodeList") or [])
                      for n in (seq.get("dailySignNodeList") or [])]
         except Exception:
@@ -272,10 +262,8 @@ class AliExpressClaimer(BaseClaimer):
         super().__init__()
         # Wallet balance from the coin mtop API (DOM shows only animated digits); set by the network handler.
         self._user_coins: int | None = None
-        self._coin_payloads: list[dict] = []  # parsed and flattened unique coin/check-in responses
-        self._coin_payload_keys: set[tuple[str, str]] = set()
-        self._coin_dump_version = 0
-        self._coin_dumped_version = 0
+        self._coin_reqs: dict = {}  # requestId -> url, for coin/check-in mtop responses
+        self._coin_payloads: list[dict] = []  # flattened coin/check-in responses (streak, tomorrow, balance)
 
     async def run(self) -> None:
         """Main entry point for the AliExpress daily check-in flow."""
@@ -338,61 +326,81 @@ class AliExpressClaimer(BaseClaimer):
         # CDP mobile device metrics + client-hints so emitted Sec-CH-UA-* agree with the fingerprint.
         self.logger.debug("Enabling CDP mobile device metrics emulation...")
         try:
-            cdp = await self.browser.context.new_cdp_session(self.page._page)
             # Keep the viewport inside the physical VNC window so bottom drawers aren't cut off.
             viewport_height = (
                 min(int(fp["screen_h"]), cfg.height - 40)
                 if cfg.height > 100 else int(fp["screen_h"])
             )
-            await cdp.send("Emulation.setDeviceMetricsOverride", {
-                "width": int(fp["screen_w"]),
-                "height": int(viewport_height),
-                "deviceScaleFactor": float(fp["dpr"]),
-                "mobile": True,
-            })
+            await self.page.send(uc.cdp.emulation.set_device_metrics_override(
+                width=int(fp["screen_w"]),
+                height=int(viewport_height),
+                device_scale_factor=float(fp["dpr"]),
+                mobile=True,
+            ))
             # Client-hint metadata from the same fingerprint, forcing mobile=True (browserforge sometimes reports mobile:false).
             md = fp["ua_metadata"]
-            ua_metadata = {
-                "platform": md.get("platform", "Android"),
-                "platformVersion": md.get("platformVersion", ""),
-                "architecture": md.get("architecture", ""),
-                "model": md.get("model", ""),
-                "mobile": True,
-                "brands": md.get("brands", []),
-                "fullVersionList": md.get("fullVersionList", []),
-                "fullVersion": md.get("uaFullVersion", ""),
-                "bitness": md.get("bitness", ""),
-                "wow64": False,
-            }
-            await cdp.send("Emulation.setUserAgentOverride", {
-                "userAgent": mobile_ua,
+            brands = [
+                uc.cdp.emulation.UserAgentBrandVersion(brand=b["brand"], version=b["version"])
+                for b in md.get("brands", [])
+            ]
+            full_versions = [
+                uc.cdp.emulation.UserAgentBrandVersion(brand=b["brand"], version=b["version"])
+                for b in md.get("fullVersionList", [])
+            ]
+            ua_metadata = uc.cdp.emulation.UserAgentMetadata(
+                platform=md.get("platform", "Android"),
+                platform_version=md.get("platformVersion", ""),
+                architecture=md.get("architecture", ""),
+                model=md.get("model", ""),
+                mobile=True,
+                brands=brands,
+                full_version_list=full_versions,
+                full_version=md.get("uaFullVersion", ""),
+                bitness=md.get("bitness", ""),
+                wow64=False,
+            )
+            await self.page.send(uc.cdp.emulation.set_user_agent_override(
+                user_agent=mobile_ua,
                 # Raw language list (no q-values); Chrome appends the q-factors.
-                "acceptLanguage": fp["accept_language"],
-                "platform": fp["platform"],
-                "userAgentMetadata": ua_metadata,
-            })
+                accept_language=fp["accept_language"],
+                platform=fp["platform"],
+                user_agent_metadata=ua_metadata,
+            ))
         except Exception as e:
             self.logger.debug("CDP emulation override exception: %s", e)
 
         # Block app-scheme requests (aliexpress://, intent://…) that pop 'Open xdg-open?' dialogs.
         try:
-            await cdp.send("Network.enable")
-            await cdp.send("Network.setBlockedURLs", {"urls": [
+            await self.page.send(uc.cdp.network.enable())
+            await self.page.send(uc.cdp.network.set_blocked_urls(urls=[
                 "*aliexpress://*", "*aliexpresshd://*", "*aecmd://*", "*alibaba://*",
                 "*intent://*", "*market://*", "*android-app://*",
                 "*alipay://*", "*alipays://*", "*tmall://*", "*taobao://*",
                 "aliexpress:*", "aliexpresshd:*", "aecmd:*", "alibaba:*",
                 "intent:*", "market:*", "android-app:*",
                 "alipay:*", "alipays:*", "tmall:*", "taobao:*",
-            ]})
+            ]))
         except Exception as e:
             self.logger.debug("CDP set_blocked_urls exception: %s", e)
 
-        # Inject fingerprint + app-block + coin-capture at document-start.
+        # Inject fingerprint + app-block + coin-capture at document-start (Page.enable first, else it's a no-op).
         try:
-            await self.browser.context.add_init_script(fp["inject_js"])
-            await self.browser.context.add_init_script(_APP_BLOCK_JS)
-            await self.browser.context.add_init_script(_COIN_CAPTURE_JS)
+            await self.page.send(uc.cdp.page.enable())
+            await self.page.send(
+                uc.cdp.page.add_script_to_evaluate_on_new_document(
+                    source=fp["inject_js"],
+                )
+            )
+            await self.page.send(
+                uc.cdp.page.add_script_to_evaluate_on_new_document(
+                    source=_APP_BLOCK_JS,
+                )
+            )
+            await self.page.send(
+                uc.cdp.page.add_script_to_evaluate_on_new_document(
+                    source=_COIN_CAPTURE_JS,
+                )
+            )
         except Exception as e:
             self.logger.debug("Fingerprint / app-block JS injection exception: %s", e)
 
@@ -469,46 +477,48 @@ class AliExpressClaimer(BaseClaimer):
         original free-games-claimer reads.
         """
         try:
-            self.page._page.on("response", self._on_coin_response)
+            self.page.add_handler(uc.cdp.network.ResponseReceived, self._on_coin_response)
+            self.page.add_handler(uc.cdp.network.LoadingFinished, self._on_coin_loading_finished)
         except Exception as e:
             self.logger.debug("Could not install coin API listener: %s", e)
 
-    def _store_coin_payload(self, url: str, body: str) -> dict | None:
-        try:
-            parsed = json.loads(body)
-        except (TypeError, ValueError):
-            return None
-        api = parsed.get("api") if isinstance(parsed, dict) else None
-        identity = str(api or url)
-        key = (identity, body)
-        if key in self._coin_payload_keys:
-            return None
-        self._coin_payload_keys.add(key)
-        fields = _flatten_payload(parsed.get("data") if isinstance(parsed, dict) else parsed)
-        payload = {"api": identity, "url": url, "fields": fields, "body": body, "parsed": parsed}
-        self._coin_payloads.append(payload)
-        self._coin_dump_version += 1
-        coins = _as_int(_field_by_leaf(fields, "userCoinsNum"))
-        if coins is not None:
-            self._user_coins = coins
-            self.logger.debug("🪙 Wallet balance (userCoinsNum): %s", self._user_coins)
-        return payload
+    async def _on_coin_response(self, event) -> None:
+        """Record coin / check-in mtop responses so their body can be read on finish.
 
-    async def _on_coin_response(self, response) -> None:
+        Broad match (not just the US coin.execute prefix) because the real
+        endpoint differs by region/mobile, the diagnostic dump below reveals it.
+        """
+        try:
+            url = getattr(getattr(event, "response", None), "url", "") or ""
+            u = url.lower()
+            if (url.startswith(COIN_API_PREFIX)
+                    or ("mtop" in u and ("coin" in u or "checkin" in u or "sign" in u))
+                    or ("acs." in u and "coin" in u)):
+                self._coin_reqs[event.request_id] = url
+        except Exception:
+            pass
+
+    async def _on_coin_loading_finished(self, event) -> None:
         """Read a coin/check-in mtop body: keep the latest userCoinsNum and the
         flattened response, same as the in-page capture path."""
         try:
-            url = response.url
-            u = url.lower()
-            if not (url.startswith(COIN_API_PREFIX)
-                    or ("mtop" in u and ("coin" in u or "checkin" in u or "sign" in u))
-                    or ("acs." in u and "coin" in u)):
+            rid = event.request_id
+            url = self._coin_reqs.pop(rid, None)
+            if url is None:
                 return
-            body = (await response.body()).decode("utf-8", "ignore")
-            payload = self._store_coin_payload(url, body)
-            if payload:
-                self.logger.debug("🔬 Coin API captured: api=%s fields=%s",
-                                  payload["api"], sorted(payload["fields"])[:40])
+            body, b64 = await self.page.send(uc.cdp.network.get_response_body(rid))
+            if b64 and isinstance(body, str):
+                body = base64.b64decode(body).decode("utf-8", "ignore")
+            payload = json.loads(body)
+            api = payload.get("api") if isinstance(payload, dict) else None
+            fields = _flatten_payload(payload.get("data") if isinstance(payload, dict) else payload)
+            if fields:
+                self._coin_payloads.append({"api": api or url, "url": url, "fields": fields, "body": body})
+            coins = _as_int(_field_by_leaf(fields, "userCoinsNum"))
+            if coins is not None:
+                self._user_coins = coins
+                self.logger.debug("🪙 Wallet balance (userCoinsNum): %s", self._user_coins)
+            self.logger.debug("🔬 Coin API captured: api=%s fields=%s", api, sorted(fields.keys())[:40])
         except Exception as e:
             self.logger.debug("Coin API body parse failed: %s", e)
 
@@ -521,47 +531,49 @@ class AliExpressClaimer(BaseClaimer):
         (window.__fgcCoin resets on navigation).
         """
         try:
-            result = await self.page.evaluate(
-                "(() => { const a = window.__fgcCoin || []; "
-                "const s = Math.min(window.__fgcCoinCursor || 0, a.length); "
-                "window.__fgcCoinCursor = a.length; "
-                "return JSON.stringify({length: a.length, items: a.slice(s)}); })()"
-            )
-            capture = json.loads(result) if isinstance(result, str) else {}
-            items = capture.get("items") or []
-            self._coin_capture_cursor = int(capture.get("length") or 0)
+            raw = await self.page.evaluate("JSON.stringify(window.__fgcCoin || [])")
+            items = json.loads(raw) if isinstance(raw, str) else []
         except Exception as e:
             self.logger.debug("Coin capture read failed: %s", e)
             return
         if not items:
-            self.logger.debug("🔬 Coin API: nothing new captured by in-page interceptor.")
-        for item in items:
-            url = item.get("url", "")
-            body = item.get("body", "")
-            payload = self._store_coin_payload(url, body)
-            if not payload:
+            self.logger.debug("🔬 Coin API: nothing captured by in-page interceptor.")
+            return
+        for it in items:
+            url = it.get("url", "")
+            body = it.get("body", "")
+            try:
+                payload = json.loads(body)
+            except Exception:
+                self.logger.debug("🔬 Coin API (non-JSON): url=%s body=%s", url, body[:200])
                 continue
+            api = payload.get("api") if isinstance(payload, dict) else None
+            fields = _flatten_payload(payload.get("data") if isinstance(payload, dict) else payload)
+            # __fgcCoin keeps every response, so the same one is re-read on the next call.
+            if fields and not any(p["api"] == (api or url) and p["body"] == body for p in self._coin_payloads):
+                self._coin_payloads.append({"api": api or url, "url": url, "fields": fields, "body": body})
             self.logger.debug(
                 "🔬 Coin API: api=%s fields=%s",
-                payload["api"],
-                json.dumps(payload["fields"], ensure_ascii=False, default=str)[:1500],
+                api,
+                json.dumps(fields, ensure_ascii=False, default=str)[:1500],
             )
-        await self._dump_coin_payloads()
+            coins = _as_int(_field_by_leaf(fields, "userCoinsNum"))
+            if coins is not None and self._user_coins is None:
+                self._user_coins = coins
+                self.logger.debug("🪙 Wallet balance (userCoinsNum): %s", self._user_coins)
+        self._dump_coin_payloads()
 
-    async def _dump_coin_payloads(self) -> None:
-        """Write changed check-in/coin responses to data/ae_coin_api.json."""
-        version = self._coin_dump_version
-        if version == self._coin_dumped_version:
+    def _dump_coin_payloads(self) -> None:
+        """Write the captured check-in/coin responses to data/ae_coin_api.json (last run only)."""
+        if not self._coin_payloads:
             return
-        dump = [
-            {"api": p["api"], "url": p["url"], "field_names": sorted(p["fields"]), "body": p["body"]}
-            for p in self._coin_payloads
-        ]
-        path = cfg._data_dir / "ae_coin_api.json"
         try:
-            text = json.dumps(dump, ensure_ascii=False, indent=2, default=str)
-            await asyncio.to_thread(path.write_text, text, encoding="utf-8")
-            self._coin_dumped_version = version
+            dump = [
+                {"api": p["api"], "url": p["url"], "field_names": sorted(p["fields"].keys()), "body": p["body"]}
+                for p in self._coin_payloads
+            ]
+            path = cfg._data_dir / "ae_coin_api.json"
+            path.write_text(json.dumps(dump, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         except Exception as e:
             self.logger.debug("Coin API dump write failed: %s", e)
 
@@ -577,7 +589,7 @@ class AliExpressClaimer(BaseClaimer):
             if "sign.list" not in str(payload.get("api") or ""):
                 continue
             try:
-                data = (_payload_data(payload).get("data") or {}).get("data") or {}
+                data = (json.loads(payload["body"]).get("data") or {}).get("data") or {}
                 nodes = [n for seq in (data.get("signQuerySequenceNodeList") or [])
                          for n in (seq.get("dailySignNodeList") or [])]
             except Exception as e:
@@ -677,7 +689,9 @@ class AliExpressClaimer(BaseClaimer):
                 x = random.randint(30, width - 30)
                 y = random.randint(80, height - 120)
                 try:
-                    await self.page._page.mouse.move(float(x), float(y))
+                    await self.page.send(uc.cdp.input_.dispatch_mouse_event(
+                        type_="mouseMoved", x=float(x), y=float(y),
+                    ))
                 except Exception:
                     pass
                 await self._human_pause(0.3, 0.9)
@@ -932,7 +946,7 @@ class AliExpressClaimer(BaseClaimer):
     async def _click_button_by_text(self, texts: list[str]) -> bool:
         """Trusted-click the visible button/link whose exact text matches one of
         `texts`. Marks the real element (closest button/[role=button]/a) in JS,
-        then clicks it via Playwright, so the click lands on the button element
+        then clicks it via nodriver, so the click lands on the button element
         (not a child text node, which AliExpress' 'Kontynuuj' handler ignores)
         and is a trusted event.
         """
@@ -1186,31 +1200,6 @@ class AliExpressClaimer(BaseClaimer):
             self.logger.debug("Coin-count button lookup failed: %s", e)
             return None
 
-    async def _read_today_coins_dom(self) -> int | None:
-        try:
-            raw = await self.page.evaluate(r"""
-                (() => {
-                    const visible = el => !!el && el.offsetParent !== null;
-                    const todayRe = /^(today|dzi[śs]|dzisiaj)$/i;
-                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                    let textNode;
-                    while ((textNode = walker.nextNode())) {
-                        if (!todayRe.test((textNode.nodeValue || '').trim()) || !visible(textNode.parentElement)) continue;
-                        let node = textNode.parentElement;
-                        for (let up = 0; up < 3 && node.parentElement; up++) {
-                            node = node.parentElement;
-                            const m = (node.textContent || '').match(/\+?\s*(\d+)/);
-                            if (m) return parseInt(m[1], 10);
-                        }
-                    }
-                    return null;
-                })()
-            """)
-            return _as_int(raw)
-        except Exception as e:
-            self.logger.debug("Today's calendar amount lookup failed: %s", e)
-            return None
-
     async def _read_checkin_state(self) -> dict:
         """Read today's check-in state from the coin page.
 
@@ -1248,7 +1237,25 @@ class AliExpressClaimer(BaseClaimer):
                         if (earnText === null && earnRe.test(t)) earnText = t;
                     }
 
-                    // Return JSON for consistency with the adapter evaluation path.
+                    // Fallback: read today's amount from the check-in calendar chip
+                    // marked "Today" / "Dziś" (its container shows the coin value).
+                    if (todayCoins === null) {
+                        const todayRe = /^(today|dzi[śs]|dzisiaj)$/i;
+                        for (const el of document.querySelectorAll('*')) {
+                            const own = (el.childElementCount === 0 ? (el.textContent || '') : '').trim();
+                            if (!todayRe.test(own) || !isVisible(el)) continue;
+                            let node = el;
+                            for (let up = 0; up < 3 && node.parentElement; up++) {
+                                node = node.parentElement;
+                                const m = (node.textContent || '').match(/\+?\s*(\d+)/);
+                                if (m) { todayCoins = parseInt(m[1], 10); break; }
+                            }
+                            if (todayCoins !== null) break;
+                        }
+                    }
+
+                    // nodriver does not serialise JS objects into Python dicts,
+                    // so return a JSON string and parse it on the Python side.
                     return JSON.stringify({
                         claimed: btnText === null && earnText !== null,
                         btnText: btnText,
@@ -1560,10 +1567,6 @@ class AliExpressClaimer(BaseClaimer):
             coins = state.get("todayCoins")
             if coins is None:
                 coins = today.get("coins")
-            if coins is None and state.get("btnText"):
-                coins = await self._read_today_coins_dom()
-                if coins is not None:
-                    state = {**state, "todayCoins": coins}
 
             if state.get("claimed") or today.get("claimed"):
                 self.logger.info(

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 import logging
-from typing import TYPE_CHECKING
 
+import nodriver as uc
 import pyotp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -14,11 +14,7 @@ from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS, open_first_tab, now_
 from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.prime")
-
 
 # Prime Gaming claims page URL (shows all available free games)
 BASE_URL = "https://luna.amazon.com"
@@ -88,27 +84,29 @@ class PrimeGamingClaimer(BaseClaimer):
 
             # Force the password path: kill WebAuthn + Amazon's passkey/mshop sign-in forms.
             try:
-                await self.browser.context.add_init_script(
-                    """
-                        try { Object.defineProperty(window, 'PublicKeyCredential', { configurable: true, get: () => undefined }); } catch (e) {}
-                        try {
-                            const noop = () => new Promise(() => {});  // never resolves, so no passkey error
-                            if (navigator.credentials) { navigator.credentials.get = noop; navigator.credentials.create = noop; }
-                        } catch (e) {}
-                        (function () {
-                            // Remove the wrong sign-in forms; leave only form[name="signIn"] (password).
-                            const KILL = ['form[name="signInWithPasskeyButton"]', 'form[name="signInWithMShopButton"]', '#auth-signin-via-passkey-section', '#auth-signin-via-passkey-btn'];
-                            const sweep = () => { try {
-                                KILL.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
-                                document.querySelectorAll('[data-action="SIGNIN_PASSKEY_COLLECT"]').forEach(el => el.removeAttribute('data-action'));
-                            } catch (e) {} };
+                await self.page.send(
+                    uc.cdp.page.add_script_to_evaluate_on_new_document(
+                        source="""
+                            try { Object.defineProperty(window, 'PublicKeyCredential', { configurable: true, get: () => undefined }); } catch (e) {}
                             try {
-                                sweep();
-                                document.addEventListener('DOMContentLoaded', sweep);
-                                new MutationObserver(sweep).observe(document, { childList: true, subtree: true });
+                                const noop = () => new Promise(() => {});  // never resolves, so no passkey error
+                                if (navigator.credentials) { navigator.credentials.get = noop; navigator.credentials.create = noop; }
                             } catch (e) {}
-                        })();
-                    """
+                            (function () {
+                                // Remove the wrong sign-in forms; leave only form[name="signIn"] (password).
+                                const KILL = ['form[name="signInWithPasskeyButton"]', 'form[name="signInWithMShopButton"]', '#auth-signin-via-passkey-section', '#auth-signin-via-passkey-btn'];
+                                const sweep = () => { try {
+                                    KILL.forEach(s => document.querySelectorAll(s).forEach(el => el.remove()));
+                                    document.querySelectorAll('[data-action="SIGNIN_PASSKEY_COLLECT"]').forEach(el => el.removeAttribute('data-action'));
+                                } catch (e) {} };
+                                try {
+                                    sweep();
+                                    document.addEventListener('DOMContentLoaded', sweep);
+                                    new MutationObserver(sweep).observe(document, { childList: true, subtree: true });
+                                } catch (e) {}
+                            })();
+                        """
+                    )
                 )
             except Exception as e:
                 self.logger.debug("Passkey neutralization script injection exception: %s", e)
@@ -594,21 +592,29 @@ class PrimeGamingClaimer(BaseClaimer):
     # ------------------------------------------------------------------
 
     async def _ensure_page_alive(self) -> None:
-        """Check if the page is still responsive. If not, recover it."""
+        """Check if the CDP tab/session is still responsive. If not, recover it.
+
+        After login (especially VNC manual login), the browser may open a new tab
+        or the original tab's CDP session may become invalid. This method detects
+        that and re-attaches to a working tab so navigation doesn't crash.
+        """
         try:
+            # Quick health check: try to read the current URL
             await self.page.evaluate("window.location.href")
         except Exception:
-            logger.warning("Page lost, attempting to recover...")
+            logger.warning("CDP session lost, attempting to recover...")
             try:
-                pages = self.browser.tabs
-                if pages:
-                    self.page = pages[0]
-                    logger.debug("Recovered page: %s", self.page.url)
+                # Get all open tabs from the browser and pick the first valid one
+                tabs = self.browser.tabs
+                if tabs:
+                    self.page = tabs[0]
+                    logger.debug("Recovered CDP session on tab: %s", self.page.target.url)
                 else:
+                    # No tabs at all, open a fresh one (browser.get() alone would raise here, issue #38)
                     self.page = await open_first_tab(self.browser)
-                    logger.debug("Opened new page after session loss.")
+                    logger.debug("Opened new tab after session loss.")
             except Exception:
-                logger.exception("Page recovery failed, opening fresh page.")
+                logger.exception("Session recovery failed, opening fresh tab.")
                 self.page = await open_first_tab(self.browser)
 
     # ------------------------------------------------------------------
@@ -618,7 +624,8 @@ class PrimeGamingClaimer(BaseClaimer):
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=3, max=15), reraise=True)
     async def _claim_internal_games(self) -> None:
         """Navigate to the games tab, load all, show stats, and claim."""
-        # Login or VNC interaction may have invalidated the page reference.
+        # Ensure the CDP session is still alive before navigating
+        # (login flow or VNC interaction may have invalidated the tab reference)
         await self._ensure_page_alive()
 
         await self.page.get(URL_CLAIM)
@@ -651,6 +658,8 @@ class PrimeGamingClaimer(BaseClaimer):
         await self._scroll_until_stable()
 
         # --- DOM diagnostics (helps debug zero-game issues) ---
+        # NOTE: nodriver's evaluate() returns JS objects as Python lists,
+        # NOT dicts. We must JSON.stringify() in JS and json.loads() in Python.
         import json
 
         diag_raw = await self.page.evaluate(
@@ -1217,6 +1226,7 @@ class PrimeGamingClaimer(BaseClaimer):
             if game_tab:
                 await game_tab.click()
                 await self.sleep(2)
+
 
 
 async def claim_prime() -> dict:

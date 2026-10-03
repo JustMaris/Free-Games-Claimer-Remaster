@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
+import nodriver as uc
 import pyotp
 
 from src.core.claimer import BaseClaimer, OTP_KEY_ATTEMPTS
@@ -17,11 +17,7 @@ from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.fab")
-
 
 URL_FREE = "https://www.fab.com/limited-time-free?lang=en"
 URL_LISTING = "https://www.fab.com/listings/{uid}"
@@ -643,17 +639,44 @@ class FabClaimer(BaseClaimer):
     # Epic checkout (a cross-origin iframe over the listing page)
     # ------------------------------------------------------------------
 
+    def _walk_nodes(self, node):
+        """Every node of a pierced DOM tree, iframe documents included."""
+        yield node
+        for child in (node.children or []):
+            yield from self._walk_nodes(child)
+        content = getattr(node, "content_document", None)
+        if content is not None:
+            yield from self._walk_nodes(content)
+
+    @staticmethod
+    def _node_attrs(node) -> dict:
+        raw = node.attributes or []
+        return {raw[i]: raw[i + 1] for i in range(0, len(raw) - 1, 2)}
+
     async def _checkout_document(self):
-        """The checkout frame, the parent page cannot reach into it."""
-        for frame in self.page._page.frames:
-            if frame != self.page._page.main_frame and CHECKOUT_PATH in frame.url:
-                return frame
+        """The checkout frame's document, the parent page cannot reach into it."""
+        try:
+            doc = await self.page.send(uc.cdp.dom.get_document(depth=-1, pierce=True))
+        except Exception as exc:
+            logger.debug("Could not read the pierced DOM: %s", exc)
+            return None
+        for node in self._walk_nodes(doc):
+            if node.node_name == "IFRAME" and CHECKOUT_PATH in self._node_attrs(node).get("src", ""):
+                return getattr(node, "content_document", None)
         return None
 
-    async def _checkout_eval(self, frame, function_declaration: str):
+    async def _checkout_eval(self, document, function_declaration: str):
         """Run JS inside the checkout frame and parse what it returns."""
         try:
-            raw = await frame.evaluate(f"({function_declaration}).call(document)")
+            handle = await self.page.send(uc.cdp.dom.resolve_node(node_id=document.node_id))
+            result = await self.page.send(uc.cdp.runtime.call_function_on(
+                function_declaration=function_declaration,
+                object_id=handle.object_id,
+                return_by_value=True,
+            ))
+            if isinstance(result, tuple):
+                result = result[0]
+            raw = getattr(result, "value", None)
             return json.loads(raw) if isinstance(raw, str) else raw
         except Exception as exc:
             logger.debug("Could not evaluate inside the checkout frame: %s", exc)

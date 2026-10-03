@@ -9,18 +9,13 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING
 
 from src.core.claimer import BaseClaimer
 from src.core.config import cfg
 from src.core.database import async_session, get_or_create
 from src.core.url_security import url_has_allowed_host
 
-if TYPE_CHECKING:
-    from src.types import GameDict
-
 logger = logging.getLogger("fgc.unity")
-
 
 URL_SALE = "https://assetstore.unity.com/publisher-sale"
 URL_BASE = "https://assetstore.unity.com"
