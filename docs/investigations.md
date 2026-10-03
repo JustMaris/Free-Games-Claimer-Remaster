@@ -26,7 +26,7 @@ The log only counts challenges that didn't clear within the settle window. If th
 - Sep 29, upstream `p-adamiec:latest` (nodriver): 4 of 4 Epic claims went through unattended, about 75 s each.
 - Oct 1 to Oct 3, this fork on Playwright and then patchright: 0 unattended Epic claims. Every checkout hit an hCaptcha inside the cross-origin checkout iframe (screenshot `epic_checkout_*.png`, frame buttons `Add to library`, `TRY AGAIN`). Patchright made no difference.
 - Oct 3: with the iframe captcha detected and handed to VNC, BURIED STARS was claimed after a manual solve.
-- Still to do: one upstream v1.9 run on the same account against the same pending games, to rule out Epic's risk scoring changing between those dates.
+- Oct 3, 06:30: upstream v1.9 (nodriver, Chrome 153), same account, same profile, same pending games: claimed System Shock 2 and Bridge Constructor Studio (iOS) unattended in about 2 minutes, with no captcha. **The checkout hCaptcha comes from moving off nodriver.**
 
 **Decision it feeds:** keep patchright, go back to nodriver (better upstream fit), or try patchright with real Chrome (`channel="chrome"`, x86-64 only).
 
