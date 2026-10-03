@@ -87,7 +87,9 @@ if not cfg.debug_libs:
 # asyncio warns about Chrome PIDs we deliberately reaped ourselves in close_browser().
 class ReapedChildFilter(logging.Filter):
     def filter(self, record):
-        return not str(record.msg).startswith("Unknown child process pid")
+        # Chrome's children are reaped by psutil before asyncio's watcher gets to them.
+        # Python 3.11 words it "Unknown child process pid", 3.12+ "child process pid ... already read".
+        return not str(record.msg).startswith(("Unknown child process pid", "child process pid"))
 
 logging.getLogger("asyncio").addFilter(ReapedChildFilter())
 
