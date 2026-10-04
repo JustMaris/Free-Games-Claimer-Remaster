@@ -53,14 +53,14 @@ class TestIntParsing:
 
 
 class TestNotifyToggles:
-    def test_both_default_to_off(self, monkeypatch):
+    def test_failures_are_reported_by_default_owned_games_are_not(self, monkeypatch):
         cfg = _reload(monkeypatch)
-        assert cfg.notify_claim_fails is False
+        assert cfg.notify_claim_fails is True
         assert cfg.notify_already_claimed is False
 
-    def test_can_be_enabled(self, monkeypatch):
-        cfg = _reload(monkeypatch, NOTIFY_CLAIM_FAILS="true", NOTIFY_ALREADY_CLAIMED="true")
-        assert cfg.notify_claim_fails is True
+    def test_each_can_be_flipped(self, monkeypatch):
+        cfg = _reload(monkeypatch, NOTIFY_CLAIM_FAILS="false", NOTIFY_ALREADY_CLAIMED="true")
+        assert cfg.notify_claim_fails is False
         assert cfg.notify_already_claimed is True
 
 
@@ -235,3 +235,30 @@ class TestAuthenticatorSecrets:
         warnings = config_module.settings_warnings()
         assert any("EG_OTPKEY" in line and "EG_OTP_KEY" in line for line in warnings)
         assert not any("secret" in line for line in warnings)
+
+
+class TestQuotedValues:
+    """A password written as 'secret' in .env arrives with its quotes through docker run or a NAS form."""
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("'my pass'", "my pass"),
+        ('"my pass"', "my pass"),
+        ("my pass", "my pass"),
+        ("it's", "it's"),
+        ("'", "'"),
+        ("'mixed\"", "'mixed\""),
+        ("''", ""),
+    ])
+    def test_one_matching_pair_is_taken_off(self, raw, expected):
+        assert config_module.unquote(raw) == expected
+
+    def test_a_quoted_password_reaches_the_store_without_quotes(self, monkeypatch):
+        cfg = _reload(monkeypatch, INDIEGALA_PASSWORD="'my pass'", INDIEGALA_EMAIL='"me@example.com"')
+        assert cfg.indiegala_password == "my pass"
+        assert cfg.indiegala_email == "me@example.com"
+
+    def test_a_variable_the_bot_does_not_know_keeps_its_quotes(self, monkeypatch):
+        monkeypatch.setenv("SOMETHING_ELSE", "'kept'")
+        _reload(monkeypatch)
+        import os
+        assert os.environ["SOMETHING_ELSE"] == "'kept'"

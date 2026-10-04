@@ -33,7 +33,8 @@ else
 	pw="-rfbauth $HOME/.vnc/passwd"
 	pwt="with password"
 	mkdir -p "$HOME/.vnc/"
-	if ! echo "$VNC_PASSWORD" | /opt/TurboVNC/bin/vncpasswd -f >"$HOME/.vnc/passwd"; then
+	# TurboVNC refuses a password file that anyone else can read (issue #67).
+	if ! echo "$VNC_PASSWORD" | /opt/TurboVNC/bin/vncpasswd -f >"$HOME/.vnc/passwd" || ! chmod 600 "$HOME/.vnc/passwd"; then
 		echo "Could not write the VNC password file in $HOME/.vnc, check who this container runs as."
 		exit 1
 	fi

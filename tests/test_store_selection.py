@@ -14,7 +14,7 @@ import pytest
 MAIN_PY = Path(__file__).resolve().parent.parent / "main.py"
 SOURCE = MAIN_PY.read_text(encoding="utf-8")
 
-EXPECTED_DEFAULT = ["steam", "epic", "fab", "prime", "gog", "microsoft", "ubisoft", "aliexpress"]
+EXPECTED_DEFAULT = ["steam", "epic", "prime", "gog", "microsoft", "ubisoft", "aliexpress"]
 
 
 def _default_stores() -> list[str]:
@@ -39,8 +39,8 @@ class TestDefaultSelection:
 
     def test_new_stores_are_not_silently_left_out(self):
         # Anything in the registry is either a default or a deliberate opt-in.
-        # Unity is opt-in until its checkout works, it can find an asset but not buy it.
-        opt_in = {"unity"}
+        # Fab and Unity hand out assets for game developers, not games, so they run only when named.
+        opt_in = {"unity", "fab"}
         missing = sorted(set(_registry_keys()) - set(_default_stores()) - opt_in)
         assert not missing, (
             f"{missing} exist in ALL_CLAIMERS but run neither by default nor as a known opt-in. "
@@ -51,10 +51,9 @@ class TestDefaultSelection:
     def test_each_expected_store_is_present(self, store):
         assert store in _default_stores()
 
-    def test_epic_runs_before_fab(self):
-        # Fab reuses Epic's session, so Epic signing in first saves it a login.
-        order = _default_stores()
-        assert order.index("epic") < order.index("fab")
+    @pytest.mark.parametrize("store", ["fab", "unity"])
+    def test_the_asset_stores_are_opt_in(self, store):
+        assert store not in _default_stores()
 
     def test_gamerpower_is_not_a_store(self):
         # It finds giveaways and hands them to the store they belong to, it claims nothing itself.
@@ -124,3 +123,14 @@ class TestUnknownSitesStayOff:
             assert GamerPowerClaimer._side_store_selected("fanatical") is False
         finally:
             selection.reset_active_stores()
+
+
+class TestTheOldSwitchesAreGone:
+    """FANATICAL_ENABLE and friends were replaced by STORES in 1.9 and removed in 1.11."""
+
+    def test_nothing_picks_a_store_from_them(self):
+        assert "_legacy_side_stores" not in SOURCE and "_LEGACY_SIDE_FLAGS" not in SOURCE
+
+    def test_the_hint_names_the_store_to_put_in_stores(self):
+        warn = SOURCE.split("def _warn_about_settings", 1)[1].split("\ndef ", 1)[0]
+        assert "so name {store} there" in warn

@@ -125,17 +125,9 @@ SIDE_STORES: tuple[str, ...] = ("itchio", "fanatical", "indiegala", "alienware")
 # Stores GamerPower hands its finds to. Naming one of these is reason enough to ask GamerPower.
 GP_TARGETS: tuple[str, ...] = ("steam", "epic", "gog", "microsoft")
 
-# The old switch for each side store, honoured for one more release.
-_LEGACY_SIDE_FLAGS: dict[str, str] = {
-    "itchio": "itchio_enable",
-    "fanatical": "fanatical_enable",
-    "indiegala": "indiegala_enable",
-    "alienware": "alienware_enable",
-}
-
 # What runs when neither the CLI nor STORES names anything. GamerPower goes last so the
 # stores with their own module claim first and its database dedup can do its job.
-DEFAULT_STORES: list[str] = ["steam", "epic", "fab", "prime", "gog", "microsoft", "ubisoft", "aliexpress"]
+DEFAULT_STORES: list[str] = ["steam", "epic", "prime", "gog", "microsoft", "ubisoft", "aliexpress"]
 
 # Display name (e.g. "Prime Gaming") → canonical store key (e.g. "prime").
 _DISPLAY_TO_KEY: dict[str, str] = {disp: key for key, (disp, _) in ALL_CLAIMERS.items()}
@@ -250,17 +242,6 @@ def _selectable() -> list[str]:
     return list(ALL_CLAIMERS) + list(SIDE_STORES)
 
 
-def _legacy_side_stores() -> list[str]:
-    """Side stores still switched on the old way, with one line telling you what replaced it."""
-    picked = []
-    for key, field in _LEGACY_SIDE_FLAGS.items():
-        if getattr(cfg, field, False):
-            picked.append(key)
-            logger.warning("%s=true still works, but stores are chosen with STORES=...,%s now.",
-                           field.upper(), key)
-    return picked
-
-
 def _resolve_stores(raw: list[str]) -> list[str]:
     """Resolve a list of user-provided store names to canonical keys."""
     resolved = []
@@ -274,9 +255,6 @@ def _resolve_stores(raw: list[str]) -> list[str]:
             # GamerPower is a source now: its finds go to the store they belong to.
             logger.warning("'gamerpower' is not a store any more. Its finds go to the store they "
                            "belong to, so name the stores you want: STORES=steam,epic,itchio")
-            for legacy in _legacy_side_stores():
-                if legacy not in resolved:
-                    resolved.append(legacy)
             continue
         if key not in resolved:
             resolved.append(key)
@@ -288,14 +266,20 @@ def _warn_about_settings() -> None:
     for line in settings_warnings():
         name = line.split(" ", 1)[0].split("=", 1)[0]
         hint = ""
-        if name.endswith("_ENABLE") and _ALIASES.get(name[:-7].lower()) in _selectable():
-            hint = " Stores are chosen with STORES=..., there is no switch of its own for this one."
+        store = _ALIASES.get(name[:-7].lower()) if name.endswith("_ENABLE") else None
+        if store in _selectable():
+            hint = f" Stores are chosen with STORES=..., so name {store} there to have it run."
         logger.warning("%s%s", line, hint)
 
     unknown = sorted(cfg.notify_skip_stores - set(_selectable()) - {"gamerpower"})
     if unknown:
         logger.warning("NOTIFY_SKIP_STORES names %s, which is not a store, so nothing is silenced there. "
-                       "Valid: %s", ", ".join(unknown), ", ".join(ALL_CLAIMERS))
+                       "Valid: %s", ", ".join(unknown), ", ".join(_selectable()))
+
+
+def _resolve_skip_stores() -> None:
+    """NOTIFY_SKIP_STORES takes every name STORES takes, so ms or itch silence their store too."""
+    cfg.notify_skip_stores = {_ALIASES.get(name, name) for name in cfg.notify_skip_stores}
 
 
 def _selected_stores() -> list[str]:
@@ -314,7 +298,7 @@ def _selected_stores() -> list[str]:
     elif cfg.stores:
         selected = _resolve_stores([s for s in cfg.stores.split(",") if s.strip()])
     else:
-        selected = list(DEFAULT_STORES) + _legacy_side_stores()
+        selected = list(DEFAULT_STORES)
 
     # Published so a side store only runs when this run asked for it.
     apply_run_selection(selected)
@@ -391,7 +375,7 @@ async def run_claimers() -> None:
                 aggregated_results.append(res)
         except Exception:
             logger.exception("✗ %s crashed", name)
-            if cfg.store_notify_enabled(_store_key(name)):
+            if cfg.notify_errors and cfg.store_notify_enabled(_store_key(name)):
                 await notify(f"{name} claimer crashed with an unhandled exception. Check logs.")
 
     # After standard claimers finish, check for pending GOG codes from Prime Gaming.
@@ -462,6 +446,22 @@ async def run_claimers() -> None:
         except Exception:
             logger.exception("✗ GamerPower side stores crashed")
 
+    # Steam keys a side site handed out (Fanatical), activated after the sites that hand them out.
+    if "Steam" in store_names:
+        try:
+            from src.stores.steam import SteamClaimer
+
+            steam_keys = SteamClaimer()
+            await steam_keys.redeem_pending_keys()
+            if steam_keys.notify_games:
+                steam_entry = next((e for e in aggregated_results if e["store"] == "Steam"), None)
+                if steam_entry:
+                    steam_entry["games"].extend(steam_keys.notify_games)
+                else:
+                    aggregated_results.append({"store": "Steam", "user": steam_keys.user, "games": steam_keys.notify_games})
+        except Exception:
+            logger.exception("Failed to activate pending Steam keys")
+
     # Final Summary Notification
     if cfg.notify_summary and aggregated_results:
         from src.core.notifier import format_game_list
@@ -470,8 +470,7 @@ async def run_claimers() -> None:
             # Skip stores whose notifications are silenced (NOTIFY_SKIP_STORES).
             if not cfg.store_notify_enabled(_store_key(result.get("store", ""))):
                 continue
-            # Only real changes are reported: already-owned and skipped entries need
-            # NOTIFY_ALREADY_CLAIMED, failed ones NOTIFY_CLAIM_FAILS (both off by default).
+            # Owned and skipped entries need NOTIFY_ALREADY_CLAIMED (off), failed ones NOTIFY_CLAIM_FAILS (on).
             keep_owned = cfg.notify_already_claimed
             relevant_games = [
                 g for g in result["games"]
@@ -494,7 +493,7 @@ async def run_claimers() -> None:
             msg_parts.append(f"{header}\n{format_game_list(relevant_games)}")
             
         # Kept out of the per-store lists: the summary filter drops anything that says "skipped".
-        stuck = waiting_for_you()
+        stuck = {name: count for name, count in waiting_for_you().items() if cfg.store_notify_enabled(name)}
         if stuck:
             lines = [f"**{name.title()}**: waiting for you, {count} skipped"
                      for name, count in sorted(stuck.items())]
@@ -523,11 +522,12 @@ async def main() -> None:
     """Initialise DB and either run once or start the scheduler."""
     _print_banner()
     await notify_if_update_available(at_startup=True)
+    _resolve_skip_stores()
     # Effective settings (no credentials), the first thing worth knowing in a bug report.
     logger.debug(
-        "Settings: dryrun=%s debug_libs=%s show=%s %dx%d timeout=%ss stores=%r scheduler_hours=%s fixed=%r tz=%s "
+        "Settings: dryrun=%s debug_libs=%s show=%s %dx%d stores=%r scheduler_hours=%s fixed=%r tz=%s "
         "notify(summary=%s errors=%s fails=%s login=%s skip=%s) eg_mobile=%s(%s) data=%s",
-        cfg.dryrun, cfg.debug_libs, cfg.show, cfg.width, cfg.height, cfg.timeout // 1000, cfg.stores or "all",
+        cfg.dryrun, cfg.debug_libs, cfg.show, cfg.width, cfg.height, cfg.stores or "all",
         cfg.scheduler_hours, cfg.scheduler_fixed_times, cfg.scheduler_timezone,
         cfg.notify_summary, cfg.notify_errors, cfg.notify_claim_fails, cfg.notify_login_request,
         sorted(cfg.notify_skip_stores) or "none", cfg.eg_mobile, ",".join(cfg.eg_mobile_platform_list) or "none",

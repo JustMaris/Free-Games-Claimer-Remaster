@@ -41,3 +41,24 @@ class TestThePageIsNotEvidence:
 
     def test_an_unknown_name_falls_back_instead_of_guessing(self):
         assert '"GOG User"' in CHECK
+
+
+class TestACodeGOGSaysIsBeingRedeemed:
+    """Issue #66: "This code is currently being redeemed by someone" came back every run as "check manually"."""
+
+    REDEEM = SOURCE.split("async def _redeem_gog_code", 1)[1].split("\nasync def ", 1)[0]
+    LOCKED = REDEEM.split("elif result_state == 'locked':", 1)[1].split("\n            else:", 1)[0]
+
+    def test_the_message_is_its_own_state(self):
+        assert "currently being redeemed" in self.REDEEM and "return 'locked'" in self.REDEEM
+
+    def test_it_is_read_before_success_is_guessed(self):
+        # "redeemed" in that sentence would otherwise pass for a successful redemption.
+        assert self.REDEEM.index("return 'locked'") < self.REDEEM.index("return 'success'")
+
+    def test_the_sign_in_is_checked_and_the_code_tried_once_more(self):
+        assert "self._ensure_logged_in()" in self.LOCKED
+        assert "retried=True" in self.LOCKED and "if not retried:" in self.LOCKED
+
+    def test_it_stays_out_of_the_summary_and_the_database(self):
+        assert "notify_games" not in self.LOCKED and "obj.status" not in self.LOCKED

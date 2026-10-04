@@ -90,6 +90,40 @@ def filenamify(s: str) -> str:
 # Two goes with the authenticator secret, then a recovery code if there is one, then you over VNC.
 OTP_KEY_ATTEMPTS = 2
 
+# A human check in whatever document it runs in: the page itself, or a checkout frame inside it.
+CHALLENGE_JS = r"""
+(() => {
+    const t = (document.title || '').toLowerCase();
+    if (t.includes('just a moment') || t.includes('attention required') || t.includes('one more step')) return true;
+    if (document.querySelector('#challenge-form, #challenge-running, #cf-challenge-running')) return true;
+    // Only a widget you could actually click counts. Epic keeps a full size hCaptcha
+    // frame on every sign-in page, hidden by style, until it is really needed.
+    const seen = el => {
+        const r = el.getBoundingClientRect();
+        if (r.width < 60 || r.height < 40) return false;
+        for (let n = el; n; n = n.parentElement) {
+            const st = getComputedStyle(n);
+            if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.1) return false;
+        }
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false;
+        const at = document.elementFromPoint(cx, cy);
+        return !!at && (at === el || el.contains(at) || at.contains(el));
+    };
+    // reCAPTCHA's picture challenge is the bframe; an invisible reCAPTCHA's anchor is only its corner badge.
+    const rx = /hcaptcha|arkoselabs|funcaptcha|arkose|px-captcha|geetest|turnstile|recaptcha\/(api2|enterprise)\/(anchor|bframe)|datadome|captcha-delivery/i;
+    const badge = f => /recaptcha\/(api2|enterprise)\/anchor/i.test(f.getAttribute('src') || '') && /[?&]size=invisible/i.test(f.getAttribute('src') || '');
+    const frames = [...document.querySelectorAll('iframe')];
+    if (frames.some(f => rx.test((f.getAttribute('src') || '') + ' ' + (f.getAttribute('title') || '')) && !badge(f) && seen(f))) return true;
+    const widgets = [...document.querySelectorAll('.cf-turnstile, #h_captcha, #talon_frame_login_prod, #FunCaptcha, [id*="arkose" i], #datadome')];
+    if (widgets.some(seen)) return true;
+    const b = (document.body ? (document.body.innerText || '') : '').toLowerCase();
+    if (b.includes('verify you are human') || b.includes('checking your browser') || b.includes('complete a security check') || b.includes('needs to review the security of your connection')) return true;
+    if (b.includes("check that you're a real person") || b.includes('check that you are a real person') || b.includes('geo.captcha-delivery.com')) return true;
+    return false;
+})()
+"""
+
 
 class BaseClaimer:
     """Abstract base for all store claimers.
@@ -406,6 +440,13 @@ class BaseClaimer:
         """Close the browser and kill its whole process tree (issue #19)."""
         if not self.browser:
             return
+        # A clean close lets Chrome write its cookies to disk before the process tree is killed.
+        if self.page:
+            try:
+                await self.page.send(uc.cdp.browser.close())
+                await asyncio.sleep(1)
+            except Exception as e:
+                self.logger.debug("Clean browser close failed, killing it instead: %s", e)
         pid = getattr(self.browser, "_process_pid", None) \
             or getattr(getattr(self.browser, "_process", None), "pid", None)
         try:
@@ -631,15 +672,6 @@ class BaseClaimer:
     # Utilities
     # ------------------------------------------------------------------
 
-    async def wait_for(self, selector: str, timeout: int | None = None) -> uc.Element | None:
-        """Wait for an element matching the CSS selector to appear."""
-        timeout = timeout or (cfg.timeout // 1000)
-        try:
-            element = await self.page.find(selector, timeout=timeout)
-            return element
-        except Exception:
-            return None
-
     def _vnc_notice(self, title: str, body: str, timeout: int | None = None) -> str:
         """Build a consistent 'do X via VNC' notification with the autoconnect link."""
         timeout = timeout or cfg.vnc_login_timeout
@@ -746,7 +778,8 @@ class BaseClaimer:
             )
         self.logger.info("Open %s to finish manually (waiting %ds).", cfg.vnc_url, timeout)
 
-        if cfg.notify_login_request and self.notify_enabled:
+        # GamerPower's sites are silenced by their own name (store_key), not by "gamerpower".
+        if cfg.notify_login_request and self.notify_enabled and cfg.store_notify_enabled(key):
             await notify(msg)
 
         elapsed = 0
@@ -780,50 +813,24 @@ class BaseClaimer:
         if not self.page:
             return False
         try:
-            return bool(await self.page.evaluate(r"""
-                (() => {
-                    const t = (document.title || '').toLowerCase();
-                    if (t.includes('just a moment') || t.includes('attention required') || t.includes('one more step')) return true;
-                    if (document.querySelector('#challenge-form, #challenge-running, #cf-challenge-running')) return true;
-                    // Only a widget you could actually click counts. Epic keeps a full size hCaptcha
-                    // frame on every sign-in page, hidden by style, until it is really needed.
-                    const seen = el => {
-                        const r = el.getBoundingClientRect();
-                        if (r.width < 60 || r.height < 40) return false;
-                        for (let n = el; n; n = n.parentElement) {
-                            const st = getComputedStyle(n);
-                            if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.1) return false;
-                        }
-                        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-                        if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false;
-                        const at = document.elementFromPoint(cx, cy);
-                        return !!at && (at === el || el.contains(at) || at.contains(el));
-                    };
-                    const rx = /hcaptcha|arkoselabs|funcaptcha|arkose|px-captcha|geetest|turnstile|recaptcha\/(api2|enterprise)\/anchor/i;
-                    const frames = [...document.querySelectorAll('iframe')];
-                    if (frames.some(f => rx.test((f.getAttribute('src') || '') + ' ' + (f.getAttribute('title') || '')) && seen(f))) return true;
-                    const widgets = [...document.querySelectorAll('.cf-turnstile, #h_captcha, #talon_frame_login_prod, #FunCaptcha, [id*="arkose" i]')];
-                    if (widgets.some(seen)) return true;
-                    const b = (document.body ? (document.body.innerText || '') : '').toLowerCase();
-                    if (b.includes('verify you are human') || b.includes('checking your browser') || b.includes('complete a security check')) return true;
-                    if (b.includes("check that you're a real person") || b.includes('check that you are a real person')) return true;
-                    return false;
-                })()
-            """))
+            return bool(await self.page.evaluate(CHALLENGE_JS))
         except Exception:
             return False
 
-    async def _wait_out_challenge(self, label: str, settle: int = 12, store_key: str | None = None) -> bool:
+    async def _wait_out_challenge(self, label: str, settle: int = 12, store_key: str | None = None,
+                                  present_fn=None) -> bool:
         """Clear a human-check: let it auto-pass, else alert the user to solve via VNC.
 
         First waits up to ``settle`` seconds for a managed/invisible challenge to
         clear on its own (so we don't ping the user needlessly). If it's still
         blocking, sends a single VNC alert and polls until it's gone or the login
         timeout hits. Returns True if the challenge cleared, False on timeout.
+        ``present_fn`` looks somewhere other than the page itself, e.g. inside a checkout frame.
         """
+        present = present_fn or self._human_challenge_present
         waited = 0
         while waited < settle:
-            if not await self._human_challenge_present():
+            if not await present():
                 return True
             await asyncio.sleep(2)
             waited += 2
@@ -835,7 +842,7 @@ class BaseClaimer:
         )
 
         async def _cleared() -> bool:
-            return not await self._human_challenge_present()
+            return not await present()
 
         return await self._wait_for_vnc_login(_cleared, custom_msg=custom_msg, store_key=store_key)
 

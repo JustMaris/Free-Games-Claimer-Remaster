@@ -427,7 +427,8 @@ class GOGClaimer(BaseClaimer):
 
             # Update the database record with the claim result
             obj.status = status
-            notify_game["status"] = status
+            # GOG's own error text carries no "failed", which NOTIFY_CLAIM_FAILS looks for.
+            notify_game["status"] = status if status in ("claimed", "existed", "failed") else f"failed: {status}"
             self.notify_games.append(notify_game)
             await session.commit()
 
@@ -513,7 +514,7 @@ class GOGClaimer(BaseClaimer):
         finally:
             await self.close_browser()
 
-    async def _redeem_gog_code(self, code: str, title: str, url: str) -> None:
+    async def _redeem_gog_code(self, code: str, title: str, url: str, retried: bool = False) -> None:
         """Navigate to gog.com/redeem/<code> and complete the redemption process."""
         # GOG has a direct redemption URL: gog.com/redeem/XXXXXXXXXXXXX
         # Force English locale via /en/ path to get predictable button labels
@@ -599,7 +600,9 @@ class GOGClaimer(BaseClaimer):
                     const h1 = (document.querySelector('h1')?.textContent || '').toLowerCase();
                     const msgBox = (document.querySelector('.messages-container, .redeem__message, .status-msg')?.textContent || '').toLowerCase();
                     const bodyPart = (document.querySelector('.layout-body, main, #main, .content')?.textContent || '').toLowerCase();
+                    const page = (document.body ? document.body.innerText : '').toLowerCase();
 
+                    if (page.includes('currently being redeemed')) return 'locked';
                     if (h1.includes('success') || h1.includes('sukces') || msgBox.includes('success') || msgBox.includes('sukces') || msgBox.includes('zrealizowano') || msgBox.includes('redeemed')) return 'success';
                     if (bodyPart.includes('already') || bodyPart.includes('już') || msgBox.includes('already')) return 'already';
                     if (bodyPart.includes('success') && bodyPart.includes('order')) return 'success';
@@ -636,6 +639,16 @@ class GOGClaimer(BaseClaimer):
                     if obj:
                         obj.status = "already redeemed"
                         await session.commit()
+            elif result_state == 'locked':
+                # GOG's answer to a redemption started while signed out (#66); the code stays pending in the database.
+                if not retried:
+                    logger.info("GOG says the code for '%s' is being redeemed right now, checking the sign-in and "
+                                "trying once more.", title)
+                    if await self._ensure_logged_in():
+                        await self._redeem_gog_code(code, title, url, retried=True)
+                        return
+                logger.warning("GOG still says the code for '%s' is being redeemed, it stays pending for the next run.",
+                               title)
             else:
                 logger.warning("GOG redeem result unclear for '%s'. Code: %s", title, code)
                 self.notify_games.append({"title": title, "url": redeem_url, "status": f"code: {code} (GOG, check manually)"})

@@ -13,19 +13,33 @@ Automatically claims free games on:
 
 - <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="20" align="middle" /> **Steam** – via [SteamDB](https://steamdb.info/upcoming/free/) scraping (only *Free to Keep*, not *Play for Free*)
 - <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="20" align="middle" /> **Epic Games Store** – weekly free games, including the weekly free Android/iOS mobile game (`EG_MOBILE`)
-- <img alt="logo fab" src="https://www.google.com/s2/favicons?domain=fab.com&sz=64" width="20" align="middle" /> **Fab** – Epic's asset marketplace
+- <img alt="logo fab" src="https://www.google.com/s2/favicons?domain=fab.com&sz=64" width="20" align="middle" /> **Fab** – Epic's asset marketplace, its limited-time free assets on your Epic account (opt-in, add `fab` to `STORES`)
 - <img alt="logo unity" src="https://www.google.com/s2/favicons?domain=unity.com&sz=64" width="20" align="middle" /> **Unity Asset Store** – the weekly free [Publisher of the Week](https://assetstore.unity.com/publisher-sale) asset, coupon and all (opt-in, add `unity` to `STORES`)
 - <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="20" align="middle" /> **Amazon Prime Gaming** – monthly Prime Gaming catalogue + GOG and Microsoft key redemption
 - <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="20" align="middle" /> **GOG** – periodic free giveaways
 - <img alt="logo microsoft" src="https://www.google.com/s2/favicons?domain=xbox.com&sz=64" width="20" align="middle" /> **Microsoft Store** – Prime Gaming code redemption + paid games while they are free to keep
 - <picture><source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/ubisoft/ffffff" /><img alt="logo ubisoft" src="https://cdn.simpleicons.org/ubisoft/000000" width="20" align="middle" /></picture> **Ubisoft** – free game giveaways from [ubisoft.com/games/free](https://www.ubisoft.com/en-us/games/free) (giveaways only, never trials, demos or free weekends)
-- <img alt="logo aliexpress" src="https://www.google.com/s2/favicons?domain=aliexpress.com&sz=32" width="20" align="middle" /> **AliExpress** – automated daily check-in that collects coins, using a real-device mobile fingerprint to stay undetected and reading the balance from the coin API. The coin page sometimes arrives empty; the bot gives it one more approach, then reports it and moves on instead of retrying for half an hour (see [Troubleshooting](#troubleshooting))
+- <img alt="logo aliexpress" src="https://www.google.com/s2/favicons?domain=aliexpress.com&sz=32" width="20" align="middle" /> **AliExpress** – automated daily check-in that collects coins, using a real-device mobile fingerprint to stay undetected and reading the balance from the coin API. The coin page often arrives empty; the bot walks back to it up to `AE_PAGE_RETRIES` times (four by default), then reports it and moves on (see [Troubleshooting](#troubleshooting))
 
-**GamerPower API**, asked once at the start of every run, finds giveaways the stores themselves do not advertise, then hands each one to the matching store above. It also reaches these sites, which have no store module of their own and are chosen in `STORES` like any other store (still under development):
-- <img alt="logo fanatical" src="https://www.fanatical.com/favicon.ico" width="20" align="middle" /> **Fanatical** – auto-bypasses cookie banners and hooks Steam accounts to grab weekly PC drops. (almost ready)
+**GamerPower API**, asked once at the start of every run, finds giveaways the stores themselves do not advertise, then hands each one to the matching store above. It also reaches these sites, which have no store module of their own and are chosen in `STORES` like any other store:
+- <img alt="logo fanatical" src="https://www.fanatical.com/favicon.ico" width="20" align="middle" /> **Fanatical** – free games, confirmed in your Fanatical orders; the Steam key is then activated on your Steam account when `steam` is in `STORES` (add `fanatical` to `STORES`, see the warning below)
 - <img alt="logo itchio" src="https://itch.io/favicon.ico" width="20" align="middle" /> **Itch.io** – DRM-free indie giveaways, claimed to your library and verified there (add `itchio` to `STORES`)
-- <img alt="logo indiegala" src="https://www.indiegala.com/favicon.ico" width="20" align="middle" /> **IndieGala** – free Steam keys & DRM-free games (not ready yet)
-- <img alt="logo alienware" src="https://www.alienwarearena.com/favicon.ico" width="20" align="middle" /> **Alienware Arena** – (Notify-only) ARP point giveaways (not ready yet)
+- <img alt="logo indiegala" src="https://www.indiegala.com/favicon.ico" width="20" align="middle" /> **IndieGala** – free DRM-free games, claimed to your library and verified there (add `indiegala` to `STORES`, see the note below)
+- <img alt="logo alienware" src="https://www.alienwarearena.com/favicon.ico" width="20" align="middle" /> **Alienware Arena** – notify only: key giveaways cost ARP points and solve a captcha, so the bot tells you about them and you claim them yourself (add `alienware` to `STORES`)
+
+> [!NOTE]
+> **IndieGala is new, and your feedback helps.** Its login page always shows a captcha, so the bot types
+> your e-mail and password and asks you over VNC to tick the box. IndieGala then keeps you signed in for
+> 14 days, and the bot is built to hold on to that sign-in for all of them, so this happens at most once
+> every two weeks and only when there is an IndieGala giveaway. Two-factor sign-in is not supported for
+> IndieGala. Please tell us in the issues how it works for you, and bear with this store while it settles in.
+
+> [!WARNING]
+> **Fanatical has not been tested on a real giveaway yet.** Signing in, reading your Fanatical orders and
+> Steam's key page were checked live, but no Fanatical giveaway has come up since, so claiming one,
+> revealing its key and activating it on Steam have never run end to end. If the bot meets a Fanatical
+> giveaway on your account, please tell us in the issues how it went and attach the log from that run
+> (`DEBUG=true` helps most). Your feedback is what turns this into a store we can call finished.
 
 > [!TIP]
 > **There is more free stuff out there than the storefronts show you.** Epic advertises two games a week
@@ -87,7 +101,7 @@ AE_PASSWORD=your_password
 DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
 
 # Run only specific stores (comma-separated)
-# Leave commented to run the defaults (everything except unity and the sites
+# Leave commented to run the defaults (everything except fab, unity and the sites
 # that need an account of their own: itchio, fanatical, indiegala, alienware)
 # STORES=steam,prime,gog
 ```
@@ -128,6 +142,8 @@ Options are set via environment variables in `.env`:
 | Variable | Default | Description |
 |---|---|---|
 | `FGC_TAG` | `latest` | Docker image tag to run (set to `dev` to test experimental pre-release builds). |
+| `PUID` | | Run the bot as this user id instead of root, so files in a mounted data folder belong to you on the host. Use what `id -u` prints there. With `cap_drop: ALL` in your compose, add `cap_add: [CHOWN, SETUID, SETGID]`, which the switch needs. |
+| `PGID` | | Group id to go with `PUID` (what `id -g` prints). Defaults to `PUID`. |
 | `SHOW` | `1` | Show browser window (VNC). |
 | `WIDTH` | `1280` | Browser/VNC screen width. |
 | `HEIGHT` | `720` | Browser/VNC screen height. |
@@ -141,7 +157,6 @@ Options are set via environment variables in `.env`:
 | `RUN_ON_STARTUP` | `true` | Run once immediately when the container/application starts. |
 | `RUN_ONCE` | `false` | Claim once, then stop the container (exit code 0), for scheduling it from outside with cron or Ofelia. `SCHEDULER_HOURS=0` with no fixed times does the same, since nothing is scheduled. Set `restart: "no"` in `docker-compose.yml` or Docker will start it again straight away. |
 | `VNC_LOGIN_TIMEOUT`| `180` | Seconds the bot waits for **you** at any manual step: signing in, a code from e-mail or SMS, approving 2FA, a captcha, or Unity's checkout form. A window nobody answers ends that one store's manual steps for the rest of the run, and the summary says what it skipped. Raise it if you are not usually sitting at the computer. |
-| `TIMEOUT` | `60` | Advanced: seconds to wait for a page element before giving up. |
 | `EMAIL` | | Default login email used by ALL stores unless a store-specific `*_EMAIL` overrides it. |
 | `PASSWORD` | | Default login password used by ALL stores unless a store-specific `*_PASSWORD` overrides it. |
 | `EG_EMAIL` | | Epic Games login email. |
@@ -154,16 +169,16 @@ Options are set via environment variables in `.env`:
 | `PG_EMAIL` | | Prime Gaming (Amazon) email. |
 | `PG_PASSWORD` | | Prime Gaming password. |
 | `PG_OTP_KEY` | | Prime Gaming authenticator (TOTP) key. |
-| `PG_FORCE_CHECK_COLLECTED` | `0` | Force re-check already marked 'claimed' games. |
+| `PG_FORCE_CHECK_COLLECTED` | `false` | Force re-check already marked 'claimed' games. |
 | `GOG_EMAIL` | | GOG login email. |
 | `GOG_PASSWORD` | | GOG login password. |
-| `GOG_NEWSLETTER` | `0` | Keep newsletter sub after claiming (1 = keep). |
-| `GOG_FORCE_REDEEM` | `0` | Force re-redeem old GOG codes from Prime Gaming. |
+| `GOG_NEWSLETTER` | `false` | Keep newsletter sub after claiming (`true` = keep). |
+| `GOG_FORCE_REDEEM` | `false` | Force re-redeem old GOG codes from Prime Gaming. |
 | `GOG_OTP_KEY` | | GOG authenticator (TOTP) secret, auto-filled. Codes sent by e-mail are entered manually via VNC. |
 | `GOG_OTP_CODES` | | Comma-separated GOG recovery codes, tried after the secret. Used ones are written to `data/used_gog_codes.txt`. |
 | `MS_EMAIL` | | Microsoft account email. |
 | `MS_PASSWORD` | | Microsoft account password. |
-| `MS_FORCE_REDEEM` | `0` | Force another pass over Microsoft codes from the last 60 days. |
+| `MS_FORCE_REDEEM` | `false` | Force another pass over Microsoft codes from the last 60 days. |
 | `MS_OTP_KEY` | | Microsoft authenticator (TOTP) secret, auto-filled. E-mail codes and passkeys are done by you over VNC. |
 | `STEAM_USERNAME` | | Steam username. |
 | `STEAM_PASSWORD` | | Steam password. |
@@ -180,19 +195,15 @@ Options are set via environment variables in `.env`:
 | `AE_FLAG_RETRIES` | `3` | How many times to wait and re-approach the coin page when the offer is capped. |
 | `AE_FLAG_WAIT` | `480` | Seconds to wait between retries (kept above AliExpress' ~7-min penalty so one wait clears it). |
 | `AE_PAGE_RETRIES` | `4` | How many extra approaches to make when the coin page loads but renders nothing. AliExpress serves it empty most of the time (measured: one usable page in eight looks), so each retry is a real chance at the daily check-in. `0` gives up on the first look. |
-| `STORES` | *(see note)* | Comma-separated list of stores to run. Empty runs `steam`, `epic`, `fab`, `prime`, `gog`, `microsoft`, `ubisoft`, `aliexpress`. Add `unity`, `itchio`, `fanatical`, `indiegala` or `alienware` to switch one on. GamerPower is asked once per run and its finds go to the store they belong to, so `steam` also claims the Steam giveaways it lists. |
+| `STORES` | *(see note)* | Comma-separated list of stores to run. Empty runs `steam`, `epic`, `prime`, `gog`, `microsoft`, `ubisoft`, `aliexpress`. Add `fab`, `unity`, `itchio`, `fanatical`, `indiegala` or `alienware` to switch one on. GamerPower is asked once per run and its finds go to the store they belong to, so `steam` also claims the Steam giveaways it lists. |
 | `RESET_DB_GAMES` | `false` | Retroactively erase any database claims recorded within the last 7 days upon execution. Assists in clearing false positives. |
 | `GP_CLAIM_DLC` | `false` | Also process GamerPower's in-game DLC giveaways. Off by default: most need an account in that specific game, and they are the bulk of the feed. |
-| `FANATICAL_ENABLE`| `false`| Replaced by `STORES=...,fanatical`. Still honoured for now. |
 | `FANATICAL_EMAIL` | | Fanatical account email. |
 | `FANATICAL_PASSWORD`| | Fanatical account password. |
-| `ALIENWARE_ENABLE`| `false`| Replaced by `STORES=...,alienware`. Still honoured for now. |
-| `ITCHIO_ENABLE`| `false`| Replaced by `STORES=...,itchio`. Still honoured for now. |
 | `ITCHIO_EMAIL` | | Itch.io account email. |
 | `ITCHIO_PASSWORD` | | Itch.io account password. |
 | `ITCHIO_OTP_KEY` | | Itch.io authenticator (TOTP) secret, auto-filled. |
 | `ITCHIO_OTP_CODES` | | Comma-separated Itch.io recovery codes, tried after the secret. Used ones are recorded in `data/used_itchio_codes.txt` so none is sent twice. |
-| `INDIEGALA_ENABLE`| `false`| Replaced by `STORES=...,indiegala`. Still honoured for now. |
 | `INDIEGALA_EMAIL` | | IndieGala account email. |
 | `INDIEGALA_PASSWORD`| | IndieGala account password. |
 | `GP_UNKNOWN_STORES`| `false`| Reserved. Opening a site nobody mapped is not built yet, so this stays off whatever you set. |
@@ -206,13 +217,13 @@ Options are set via environment variables in `.env`:
 | `NOTIFY_TEST` | `false` | Send a test notification on startup to verify your setup works. |
 | `NOTIFY_SUMMARY` | `true` | Set to false to disable game claim summaries. (Applies to all services) |
 | `NOTIFY_ERRORS` | `true` | Set to false to disable fatal error alerts. (Applies to all services) |
-| `NOTIFY_CLAIM_FAILS`| `false` | Set to true to also report games that could not be claimed (e.g. a free DLC without the base game) in alerts and the run summary. (Applies to all services) |
-| `NOTIFY_ALREADY_CLAIMED`| `false` | Set to true to also list games you already own and check-ins already collected today. By default the summary shows only what actually changed in that run. |
+| `NOTIFY_CLAIM_FAILS`| `true` | Lists games and check-ins that could not be claimed in the run summary, with the reason (e.g. a free DLC without the base game). Set to false to hide them. (Applies to all services) |
+| `NOTIFY_ALREADY_CLAIMED`| `false` | Set to true to also list games you already own, check-ins already collected today and giveaways skipped on purpose (free to play, not a real giveaway). |
 | `NOTIFY_MISSING_BASE`| `true` | Set to false to drop DLC entries that failed because you do not own the base game. They repeat every run and you can only fix them by buying the base game. |
 | `NOTIFY_DOWNLOAD_ONLY`| `true` | Set to false to drop Itch.io giveaways that are only a download, with nothing to claim onto your account. Reported once by default, then silent. |
 | `NOTIFY_UPDATES` | `true` | Check GitHub for a newer release (at startup, then at most once a day) and notify you once per version. Set to false to disable the check entirely, no request is made. |
 | `NOTIFY_LOGIN_REQUEST`| `true` | Set to false to disable VNC login request pings. (Applies to all services) |
-| `NOTIFY_SKIP_STORES` | | Comma-separated store keys whose notifications are silenced (they still run/claim). Accepts aliases (`ae`, `amazon`, `gp`). Example: `aliexpress`. |
+| `NOTIFY_SKIP_STORES` | | Comma-separated stores whose notifications are silenced (they still run/claim): the summary, VNC pings and error alerts. Takes every name `STORES` takes, aliases (`ae`, `ms`, `itch`) and the GamerPower sites included. Example: `aliexpress`. |
 
 ### Two-factor sign-in
 
@@ -237,6 +248,7 @@ never the same digits as the first, because a code refused inside its 30-second 
 |---|---|---|---|
 | Epic (and Fab) | `EG_OTP_KEY` | `EG_OTP_CODES` | `data/used_epic_codes.txt` |
 | GOG | `GOG_OTP_KEY` | `GOG_OTP_CODES` | `data/used_gog_codes.txt` |
+| IndieGala | not supported | not supported | the login captcha is ticked by you over VNC |
 | Itch.io | `ITCHIO_OTP_KEY` | `ITCHIO_OTP_CODES` | `data/used_itchio_codes.txt` |
 | Microsoft | `MS_OTP_KEY` | Microsoft issues one recovery code for the account, not codes for signing in | |
 | Prime Gaming | `PG_OTP_KEY` | Amazon does not issue any | |
@@ -334,14 +346,16 @@ reported at startup rather than being ignored silently.
 > **What happens in one run, in order.** GamerPower is asked first, once, and only when this run has a
 > store that can use the answer. Then each big store runs: it claims what it finds itself and, at the end
 > of the same browser session, the giveaways GamerPower found for it. Then any GOG and Microsoft keys
-> waiting from Prime Gaming are redeemed, each only when its store is in this run. Last come the sites with no module of their own (Itch.io, Fanatical, IndieGala,
-> Alienware Arena), all in one browser window.
+> waiting from Prime Gaming are redeemed, each only when its store is in this run. Then come the sites
+> with no module of their own (Itch.io, Fanatical, IndieGala, Alienware Arena), all in one browser window.
+> Last, any Steam key a Fanatical giveaway handed out is activated on your Steam account, when Steam is in
+> this run.
 >
 > So `STORES=steam` also claims the Steam giveaways GamerPower lists, and `STORES=prime` sends GamerPower
 > no request at all, because nothing in that run could use it.
 >
-> Giveaways that hand out a Steam key (like Fanatical or IndieGala) are handled differently: the key is
-> saved to your database and sent via notifications, but the bot will not sign in to Steam to redeem it.
+> Without `steam` in `STORES`, a Fanatical key stays in your Fanatical library and the summary says so.
+> IndieGala adds its games to your IndieGala library.
 
 
 ---
@@ -381,7 +395,7 @@ free-games-claimer-remaster/
 │       ├── epic.py         # Epic Games Store
 │       ├── prime.py        # Amazon Prime Gaming
 │       ├── gog.py          # GOG (+ GOG code redemption from Prime)
-│       ├── steam.py        # Steam (SteamDB scraping)
+│       ├── steam.py        # Steam (SteamDB scraping, activating keys from Fanatical)
 │       ├── epic_fab.py     # Fab limited-time free assets (shares Epic's session)
 │       ├── unity.py        # Unity Asset Store weekly free asset
 │       ├── ubisoft.py      # Ubisoft giveaways (ubisoft.com/games/free)
@@ -412,7 +426,7 @@ Ubisoft's embedded news feed, Fab's free-content blade, the GamerPower API, and 
 6. **Store selection** (`STORES`) is published to the run, so a GamerPower find is only claimed when
 this run includes the store it belongs to.
 7. **A claim counts only when the store agrees.** After the checkout the bot reads the product page
-or the account's own list back (Epic, Fab, Unity, Itch.io) and reports `claimed` only then,
+or the account's own list back (Epic, Fab, Unity, Itch.io, IndieGala, Fanatical) and reports `claimed` only then,
 otherwise it says so instead of guessing. `fgc.db` (SQLite) remembers the outcome so runs do not
 trip over each other.
 8. **Clean Notifications** dispatch to you dynamically based on the toggles configured in the `.env`
@@ -445,10 +459,10 @@ services in parallel via async dispatch.
 |---|---|
 | Store not logging in | Open VNC (`http://localhost:7080`) and login manually. Your credentials or session logic persist beautifully after first login. |
 | Steam game not detected | Check that the game is listed on [SteamDB Free](https://steamdb.info/upcoming/free/). |
-| GamerPower missing games | Itch.io, IndieGala, Alienware Arena and Fanatical each need an account there, so they run only when you name them: `STORES=...,itchio,indiegala`. Their old `{STORE}_ENABLE=true` switches still work for one more release. Giveaways for Steam, Epic or GOG are claimed by those stores themselves, so they are skipped when the store is not in your `STORES` list. |
-| Unity coupon not applied | Unity blocks the coupon while its checkout form is incomplete, see [5. Unity, first run only](#unity-one-time-setup). Two other reasons it stops on purpose: a checkout rendered in a language other than English, and `UNITY_ACCEPT_TOS=false`, which halts right before the EULA. |
-| AliExpress coins not collected | The coin page sometimes loads as an empty shell. The bot tries once more (`AE_PAGE_RETRIES`), then reports it and moves on rather than retrying for half an hour. It has been seen working again on a later run; collect in the mobile app if it persists. |
-| Epic captcha | The stealth patches prevent 99% of captchas. EU 'Right of withdrawal' overlays are automatically accepted. If a rigorous manual prompt arrives, solve it once via VNC. |
+| GamerPower missing games | Itch.io, IndieGala, Alienware Arena and Fanatical each need an account there, so they run only when you name them: `STORES=...,itchio,indiegala`. Giveaways for Steam, Epic or GOG are claimed by those stores themselves, so they are skipped when the store is not in your `STORES` list. |
+| Unity coupon not applied | Unity blocks the coupon while its checkout form is incomplete, see [Unity, one-time setup](#unity-one-time-setup). Two other reasons it stops on purpose: a checkout rendered in a language other than English, and `UNITY_ACCEPT_TOS=false`, which halts right before the EULA. |
+| AliExpress coins not collected | The coin page often loads as an empty shell. The bot walks back to it up to `AE_PAGE_RETRIES` times (four by default), then reports it and moves on. It has been seen working again on a later run; collect in the mobile app if it persists. |
+| Epic captcha | Epic asks now and then, sometimes inside the checkout window after "Add to library". The bot looks there too, pings you to solve it over VNC and finishes the claim once it is gone. The EU right-of-withdrawal step is accepted for you. |
 | False positive claims | Set `RESET_DB_GAMES=true` in your `.env`, reboot the container, and the bot will forget the last 7 days of claims, allowing the logic to try claiming them again. |
 | Setting seems to be ignored | The bot names every setting it does not read at startup, for example an invented `STEAM_ENABLE`, and every value that cannot mean what it says, for example `DRYRUN=maybe`, which counts as false. Passwords, e-mail addresses and webhook URLs are masked in that message. |
 | A store was skipped, saying it waited for you | It asked you for something in the browser (a sign-in, a code, a captcha) and nobody answered within `VNC_LOGIN_TIMEOUT`. That store stops asking for the rest of the run, so it does not sit on a login screen for hours or keep re-opening it, and the summary lists what it skipped. Raise the timeout, or let the next run pick it up. |
@@ -461,8 +475,9 @@ The container runs Chrome on a screen of its own and expects to be root inside t
 what Docker does by default. NAS app templates often change it, so three things are worth checking:
 
 - **Which user the app runs as.** The first line of the log says it: `Running as root(0), data folder is
-  writable`. Anything else and the bot can neither save your sessions nor start the screen, which arrives
-  as two faults that look unrelated.
+  writable`. If the template sets a user for the container itself, the bot can neither save your sessions
+  nor start the screen, which arrives as two faults that look unrelated. To run as your own user, leave the
+  container as root and set `PUID` and `PGID` instead (on TrueNAS the apps user is usually `568`).
 - **The memory limit.** Chrome dies the moment memory runs short, and from the outside that looks like a
   browser which never starts. Give the container 2 GB or more.
 - **The port.** noVNC listens on 7080 inside the container, so map it to a port that is free on the NAS.
@@ -511,13 +526,15 @@ starts asking for captchas. Keep that profile if you can.
 
 ### Something is not working, what to send us
 
-The normal log shows only what you act on: which store is running, who is signed in, what was found and
-what was claimed, plus every warning and error. All the diagnostic detail is still there, one switch away:
+The log already carries the bot's diagnostic detail, because `DEBUG` is on by default. With `DEBUG=false`
+it shows only what you act on: which store is running, who is signed in, what was found and claimed, plus
+every warning and error.
 
 1. **Check you are on the newest code first**, the fix may already exist. `docker logs fgc-remaster
 | head -20` prints the version in the banner. To try the development build, set `FGC_TAG=dev` in
 `.env`, then `docker compose pull` and `docker compose up -d`.
-2. Set `DEBUG=true` in `.env` and restart (`docker compose up -d`), then reproduce the problem.
+2. If your `.env` has `DEBUG=false`, remove that line and restart (`docker compose up -d`), then reproduce
+the problem.
 3. Collect the log. Go to the folder that holds your `docker-compose.yml` and run `docker logs
 fgc-remaster --tail 500 > fgc.log.txt`. **The file appears in that folder, next to
 `docker-compose.yml`**, and you drag it into the GitHub comment box. Pasting the terminal output of
@@ -545,7 +562,7 @@ you (`p***@gmail.com`), so either way it is safe to share.
 A good bug report is: what you expected, what happened, the `DEBUG=true` log around the failure, and the
 matching screenshot. `DEBUG=true` covers what the bot itself did; only add `DEBUG_LIBS=true` if you are
 asked for the raw network or browser traffic, because that turns one run into tens of thousands of lines.
-Please switch both off again once the problem is solved.
+Please switch `DEBUG_LIBS` off again once the problem is solved.
 
 ---
 

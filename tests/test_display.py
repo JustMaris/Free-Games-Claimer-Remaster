@@ -114,3 +114,45 @@ class TestTheScriptReachesTheImage:
 
     def test_it_is_made_executable_with_the_others(self):
         assert "chmod +x ./*.sh" in (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+
+class TestRunningAsYourOwnUser:
+    """Issue #58: PUID and PGID, so files in a mounted data folder belong to you on the host."""
+
+    def test_nothing_changes_without_them(self):
+        # Every command goes through an empty prefix unless PUID is set.
+        assert "run_as=()" in ENTRYPOINT
+        assert 'exec "${run_as[@]}" tini -g -- "$@"' in ENTRYPOINT
+        assert '"${run_as[@]}" /fgc/start-vnc.sh' in ENTRYPOINT
+
+    def test_the_switch_happens_only_from_root(self):
+        # A container a template already started as someone else cannot change user, so it says so.
+        branch = ENTRYPOINT.split('if [ -n "${PUID:-}" ]; then', 1)[1].split("\nfi\n", 1)[0]
+        assert 'if [ "$run_uid" != "0" ]' in branch
+        assert "setpriv --reuid=\"$PUID\" --regid=\"$PGID\" --init-groups" in branch
+
+    def test_the_data_folder_is_handed_over_only_when_needed(self):
+        # Browser profiles are thousands of files, so chown only runs while something is not theirs.
+        assert "-print -quit" in ENTRYPOINT
+        assert 'chown -R "$PUID:$PGID" "$dir"' in ENTRYPOINT
+
+    def test_the_vnc_password_has_a_home_it_can_write(self):
+        assert "export HOME=/fgc/home" in ENTRYPOINT
+
+    def test_the_log_names_the_user_it_really_runs_as(self):
+        assert 'getent passwd "$run_uid"' in ENTRYPOINT
+        assert '"${run_as[@]}" test -w /fgc/data' in ENTRYPOINT
+
+    def test_dropped_capabilities_are_named_instead_of_crash_looping(self):
+        # With cap_drop: ALL the first chown failed under set -e, and Docker restarted it forever.
+        branch = ENTRYPOINT.split('if [ -n "${PUID:-}" ]; then', 1)[1].split("\nfi\n", 1)[0]
+        assert branch.index("can_switch_to") < branch.index("useradd")
+        assert "CHOWN, SETUID and SETGID" in branch and "cap_add" in branch
+
+
+class TestTheVncPassword:
+    """Issue #67: TurboVNC refuses a password file others can read, and the container looped."""
+
+    def test_the_file_is_private(self):
+        block = START_VNC.split('pw="-rfbauth', 1)[1].split("\nfi\n", 1)[0]
+        assert 'chmod 600 "$HOME/.vnc/passwd"' in block

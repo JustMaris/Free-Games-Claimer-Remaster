@@ -248,6 +248,12 @@ class UbisoftClaimer(BaseClaimer):
 
             if not await self._ensure_logged_in():
                 logger.error("Aborting Ubisoft claim flow due to login failure.")
+                for game in games:
+                    self.notify_games.append({
+                        "title": game.get("title", "Ubisoft Game"),
+                        "url": game.get("url", URL_FREE),
+                        "status": "failed:login-required",
+                    })
                 return
 
             for game in games:
@@ -449,7 +455,7 @@ class UbisoftClaimer(BaseClaimer):
             return False
 
     async def _do_login(self) -> str:
-        """Fill the Ubisoft Connect login form. Returns 'ok', 'mfa' or 'failed'."""
+        """Fill the Ubisoft Connect login form or confirm Welcome Back screen. Returns 'ok', 'mfa' or 'failed'."""
         state = await self._page_state()
         login_url = state.get("loginFrame") or ""
         # The login form lives in a cross-origin iframe, so open its own URL as a normal page.
@@ -536,8 +542,12 @@ class UbisoftClaimer(BaseClaimer):
                 return "failed"
 
         logger.debug("Login watch ended after %ds at %s", waited, (await self._current_url())[:120])
+        if url_has_allowed_host(await self._current_url(), LOGIN_HOST):
+            # The next line leaves the sign-in page, so keep what it showed for a bug report.
+            await self.take_screenshot("ubisoft_login_unfinished")
         await self.page.get(URL_ACCOUNT)
         await self.sleep(4)
+        await self._dismiss_cookie_banner()
         if await self._is_logged_in():
             logger.debug("Login outcome: ok")
             return "ok"

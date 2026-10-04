@@ -85,6 +85,9 @@ _DEPRECATED = {
     "ITCHIO_OTP_ENABLE": "",
 }
 
+# Side-store switches replaced by STORES in 1.9 and removed in 1.11.
+_RETIRED_SWITCHES = ("FANATICAL_ENABLE", "ITCHIO_ENABLE", "INDIEGALA_ENABLE", "ALIENWARE_ENABLE")
+
 
 def env_setting_kinds() -> dict:
     """Every setting this file reads, mapped to the kind of value it expects."""
@@ -156,7 +159,30 @@ def settings_warnings() -> list:
             out.append(f"{name}={mask_value(name, value)} is not a yes/no value, so it reads as false.")
         elif kinds.get(name) == "int" and value and not _looks_int(value):
             out.append(f"{name}={mask_value(name, value)} is not a number, so the default is used.")
+    # Compose hands .env over as variables, not as a file, and these went away in 1.11.
+    seen = set(env_file_settings())
+    for name in _RETIRED_SWITCHES:
+        if name not in seen and (os.environ.get(name) or "").strip():
+            out.append(f"{name} is not a setting this bot reads, so it does nothing.")
     return out
+
+
+def unquote(value: str) -> str:
+    """A value without the one pair of matching quotes around it, e.g. 'my pass' becomes my pass."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _unquote_environment() -> None:
+    """Strip quotes that reached us as part of a value: compose and dotenv remove them, docker run and NAS forms do not."""
+    for name in known_env_names():
+        value = os.environ.get(name)
+        if value:
+            os.environ[name] = unquote(value)
+
+
+_unquote_environment()
 
 
 class Config:
@@ -174,7 +200,6 @@ class Config:
     show: bool = _bool("SHOW", default=True)
     width: int = _int("WIDTH", 1280)
     height: int = _int("HEIGHT", 720)
-    timeout: int = _int("TIMEOUT", 60) * 1000          # ms
     vnc_login_timeout: int = _int("VNC_LOGIN_TIMEOUT", 180) # seconds
     novnc_port: str = os.getenv("NOVNC_PORT", "7080")
     vnc_ip: str = os.getenv("VNC_IP", "localhost")
@@ -218,7 +243,7 @@ class Config:
     notify_url: str | None = os.getenv("NOTIFY")  # apprise URL fallback
     notify_summary: bool = _bool("NOTIFY_SUMMARY", default=True)
     notify_errors: bool = _bool("NOTIFY_ERRORS", default=True)
-    notify_claim_fails: bool = _bool("NOTIFY_CLAIM_FAILS", default=False)
+    notify_claim_fails: bool = _bool("NOTIFY_CLAIM_FAILS", default=True)
     notify_already_claimed: bool = _bool("NOTIFY_ALREADY_CLAIMED", default=False)
     notify_updates: bool = _bool("NOTIFY_UPDATES", default=True)
     notify_login_request: bool = _bool("NOTIFY_LOGIN_REQUEST", default=True)
@@ -297,16 +322,11 @@ class Config:
     # --- GamerPower & Fanatical ---
     # Some GamerPower giveaways redirect to Fanatical.com,
     # which requires a Fanatical account + Steam account connection.
-    # Set FANATICAL_ENABLE=true and provide credentials to enable.
-    fanatical_enable: bool = _bool("FANATICAL_ENABLE", default=False)
+    # Switched on by naming it in STORES, like every side store.
     fanatical_email: str | None = os.getenv("FANATICAL_EMAIL") or os.getenv("EMAIL")
     fanatical_password: str | None = os.getenv("FANATICAL_PASSWORD") or os.getenv("PASSWORD")
 
-    # --- Alienware Arena ---
-    alienware_enable: bool = _bool("ALIENWARE_ENABLE", default=False)
-
     # --- Itch.io ---
-    itchio_enable: bool = _bool("ITCHIO_ENABLE", default=False)
     itchio_email: str | None = os.getenv("ITCHIO_EMAIL") or os.getenv("EMAIL")
     itchio_password: str | None = os.getenv("ITCHIO_PASSWORD") or os.getenv("PASSWORD")
     # Spent one at a time and remembered in data/used_itchio_codes.txt. The README's
@@ -315,7 +335,6 @@ class Config:
     itchio_otp_codes: list[str] = [c.strip() for c in os.getenv("ITCHIO_OTP_CODES", "").split(",") if c.strip()]
 
     # --- IndieGala ---
-    indiegala_enable: bool = _bool("INDIEGALA_ENABLE", default=False)
     indiegala_email: str | None = os.getenv("INDIEGALA_EMAIL") or os.getenv("EMAIL")
     indiegala_password: str | None = os.getenv("INDIEGALA_PASSWORD") or os.getenv("PASSWORD")
 
@@ -337,7 +356,7 @@ class Config:
 
     # --- Module selection ---
     # Comma-separated list of stores to run (e.g. "steam,prime").
-    # Empty = main.py's DEFAULT_STORES, which is every store except Unity.
+    # Empty = main.py's DEFAULT_STORES: everything except Fab, Unity and the GamerPower sites.
     stores: str = os.getenv("STORES", "")
 
 

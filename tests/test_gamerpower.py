@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from src.stores.gamerpower import (COVERED_ELSEWHERE, GamerPowerClaimer, classify_target,
-                                   download_only_status, fanatical_game_id, is_product_page,
+from src.stores.gamerpower import (COVERED_ELSEWHERE, FAN_ORDERS_JS, FAN_REVEAL_JS, GamerPowerClaimer,
+                                   classify_target, download_only_status, fanatical_game_id,
+                                   fanatical_item_is_steam, find_fanatical_item, is_product_page,
                                    is_wanted, itch_game_id, login_help_message, needs_otp,
-                                   wanted_types)
+                                   steam_key_in, wanted_types)
 
 
 class TestRoutingByHost:
@@ -245,8 +246,10 @@ class TestFanaticalClaimHonesty:
         # Both arms of the old check ended with `claimed = True; break`.
         assert self.BLOCK.count("claimed = True") == 0
 
-    def test_the_claim_is_confirmed_against_the_page(self):
-        assert "stillOffered" in self.BLOCK
+    def test_the_claim_is_confirmed_against_the_account(self):
+        # The orders API decides; the page's words are only the fallback when it cannot be read.
+        assert "find_fanatical_item(" in self.BLOCK
+        assert "_fanatical_claim_left_page()" in self.BLOCK and "stillOffered" in self.SOURCE
 
     def test_an_unconfirmed_claim_is_reported_as_such(self):
         assert 'failed:unconfirmed' in self.BLOCK
@@ -397,6 +400,44 @@ class TestDownloadOnlyGiveaways:
         assert "skipped:download-only" in block
 
 
+class TestASaleThatIsNoLongerFree:
+    """Express No. 6: GamerPower kept listing it for days after itch.io put it back at $0.39."""
+
+    def test_it_never_reaches_a_notification(self, monkeypatch):
+        import asyncio
+
+        from src.stores import gamerpower as gp
+
+        async def _yes(*_a, **_kw):
+            return True
+
+        async def _no(*_a, **_kw):
+            return False
+
+        async def _nothing(*_a, **_kw):
+            return None
+
+        async def _not_free(_title):
+            return "not-free"
+
+        monkeypatch.setattr(gp.cfg, "dryrun", False)
+        claimer = gp.GamerPowerClaimer.__new__(gp.GamerPowerClaimer)
+        claimer.notify_games = []
+        claimer.page = type("Page", (), {"get": staticmethod(_nothing)})()
+        monkeypatch.setattr(claimer, "_itch_session_ready", _yes)
+        monkeypatch.setattr(claimer, "_itch_owns_this", _no)
+        monkeypatch.setattr(claimer, "_itch_run_claim", _not_free)
+        monkeypatch.setattr(claimer, "sleep", _nothing)
+
+        asyncio.run(claimer._claim_itchio_game({"title": "Express No. 6", "final_url": "https://askgames.itch.io/express-no6"}))
+        assert claimer.notify_games == []
+
+    def test_the_walk_tells_a_price_apart_from_a_blocked_page(self):
+        source = (Path(__file__).resolve().parent.parent / "src" / "stores" / "gamerpower.py").read_text(encoding="utf-8")
+        block = source.split("async def _itch_run_claim", 1)[1].split("async def ", 1)[0]
+        assert 'return "not-free"' in block
+
+
 class TestIndieGalaSignInCheck:
     """It asked for a manual login even when signed in, because it guessed CSS classes (issue #47)."""
 
@@ -450,3 +491,149 @@ class TestItchOwnershipIsCheckedSignedIn:
     def test_the_old_guess_is_gone(self):
         # Fanatical keeps its own check, it reads a prompt that names the site.
         assert "needs_login" not in self.BLOCK
+
+
+class TestSideStorePrompts:
+    """Issue #59: itch.io called you while signed in, and the prompt said "gamerpower"."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "gamerpower.py").read_text(encoding="utf-8")
+
+    def test_every_prompt_names_the_site(self):
+        calls = re.findall(r"_wait_for_vnc_login\((.*?)\)\s*:", self.SOURCE, re.S)
+        assert calls, "no VNC waits found, the scan stopped matching"
+        assert all("custom_msg" in c for c in calls), calls
+
+    def test_cloudflare_is_let_through_before_the_session_is_judged(self):
+        ready = self.SOURCE.split("async def _itch_session_ready", 1)[1].split("\n    async def ", 1)[0]
+        assert ready.index("_human_challenge_present()") < ready.index("if await self._itch_logged_in()")
+        assert "_wait_out_challenge(" in ready
+
+
+class TestIndieGalaSignIn:
+    """Seen live on 28.09: the e-mail field was never found, LOGIN was never pressed, and a captcha stood in the way."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "gamerpower.py").read_text(encoding="utf-8")
+    LOGIN = SOURCE.split("async def _indiegala_login", 1)[1].split("\n    async def ", 1)[0]
+
+    def test_fields_without_a_name_are_found_beside_the_password(self):
+        from src.stores.gamerpower import IG_MARK_FIELDS_JS
+        assert 'input[type="password"]' in IG_MARK_FIELDS_JS and "data-fgc-mail" in IG_MARK_FIELDS_JS
+
+    def test_it_is_typed_like_a_person_would(self):
+        assert "send_keys(value)" in self.LOGIN
+        assert "setter.call" not in self.LOGIN
+
+    def test_login_is_pressed_beside_the_password_not_the_first_submit_on_the_page(self):
+        from src.stores.gamerpower import IG_SUBMIT_JS
+        assert "data-fgc-pass" in IG_SUBMIT_JS and "log ?in" in IG_SUBMIT_JS
+
+    def test_the_captcha_goes_to_you_before_login_is_pressed(self):
+        assert self.LOGIN.index("_ig_captcha_unsolved()") < self.LOGIN.index("IG_SUBMIT_JS")
+        assert "present_fn=self._ig_captcha_unsolved" in self.LOGIN
+
+    @pytest.mark.parametrize("url,expected", [
+        ("https://freebies.indiegala.com/best-plumber", "best-plumber"),
+        ("https://freebies.indiegala.com/Best-Plumber/", "best-plumber"),
+        ("https://www.gamerpower.com/open/best-plumber-pc-giveaway", ""),
+        ("https://freebies.indiegala.com.evil.tld/best-plumber", ""),
+        ("", ""),
+    ])
+    def test_the_database_key_is_indiegalas_own_slug(self, url, expected):
+        from src.stores.gamerpower import indiegala_game_id
+        assert indiegala_game_id(url) == expected
+
+    def test_a_ticked_box_counts_as_solved(self):
+        from src.stores.gamerpower import IG_CAPTCHA_UNSOLVED_JS
+        assert "g-recaptcha-response" in IG_CAPTCHA_UNSOLVED_JS and "answer.value" in IG_CAPTCHA_UNSOLVED_JS
+        assert chr(8) not in IG_CAPTCHA_UNSOLVED_JS
+
+
+class TestIndieGalaClaim:
+    """Seen live on 28.09: every signed-in page says "Search in your library", so every giveaway passed as owned."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "gamerpower.py").read_text(encoding="utf-8")
+    CLAIM = SOURCE.split("async def _claim_indiegala_game", 1)[1].split("\nasync def ", 1)[0]
+
+    def test_ownership_is_not_read_from_a_hint_every_page_carries(self):
+        from src.stores.gamerpower import IG_OWNED_JS
+        assert "just go to your library" in IG_OWNED_JS
+        assert '"in your library" in body_text' not in self.CLAIM
+
+    def test_ownership_is_judged_after_signing_in(self):
+        assert self.CLAIM.index("_ig_logged_in()") < self.CLAIM.index("_ig_owns_this()")
+
+    def test_a_dry_run_writes_nothing(self):
+        owned = self.CLAIM.split("if await self._ig_owns_this():", 1)[1].split("return", 1)[0]
+        assert "if not cfg.dryrun:" in owned
+        assert self.CLAIM.index("if cfg.dryrun:") < self.CLAIM.index("IG_MARK_CLAIM_JS")
+
+    def test_a_click_alone_is_not_a_claim(self):
+        assert "claimed = True" not in self.CLAIM
+        after = self.CLAIM.split("await button.click()", 1)[1]
+        assert "await self.page.get(url)" in after and "_ig_owns_this()" in after
+        assert '"failed:unconfirmed"' in after
+
+    def test_a_captcha_during_the_claim_goes_to_you(self):
+        assert '_clear_challenge("IndieGala")' in self.CLAIM
+
+
+class TestFanaticalAccount:
+    """Read live 4.10: the orders API answers with the site's own token, the key comes from /user/orders/redeem."""
+
+
+    ORDERS = [
+        {"_id": "o1", "items": [{"_id": "i1", "name": "Some Paid Game", "slug": "some-paid-game", "iid": 1}]},
+        {"_id": "o2", "items": [{"_id": "i2", "name": "Free Game: The Giveaway", "slug": "free-game-the-giveaway",
+                                 "serialId": 7, "iid": 2, "drm": ["steam"]}]},
+    ]
+
+    def test_the_giveaway_item_is_found_by_its_slug(self):
+        found = find_fanatical_item(self.ORDERS, "free-game-the-giveaway", "anything")
+        assert found["oid"] == "o2" and found["item"]["_id"] == "i2"
+
+    def test_or_by_its_name_when_the_slug_differs(self):
+        found = find_fanatical_item(self.ORDERS, "other-slug", "Free Game - The Giveaway!")
+        assert found["oid"] == "o2"
+
+    @pytest.mark.parametrize("orders", [[], None, "nope", [{"items": None}], [{"_id": "x", "items": ["bad"]}]])
+    def test_nothing_is_found_in_an_empty_or_odd_answer(self, orders):
+        assert find_fanatical_item(orders, "free-game-the-giveaway", "Free Game") is None
+
+    def test_another_order_is_never_taken_for_the_giveaway(self):
+        assert find_fanatical_item(self.ORDERS, "missing-slug", "Missing Game") is None
+
+    @pytest.mark.parametrize("value,key", [
+        ({"key": "abcde-fghij-klmno"}, "ABCDE-FGHIJ-KLMNO"),
+        ([{"x": {"key": "AAAAA-BBBBB-CCCCC"}}], "AAAAA-BBBBB-CCCCC"),
+        ({"key": "error"}, ""),
+        ({"key": "AAAAA-BBBBB-CCCCC-DDDDD"}, ""),
+        ({"key": "ABCDEFGHIJKLMNOPQR"}, ""),
+        (None, ""),
+    ])
+    def test_only_a_steam_shaped_key_is_taken(self, value, key):
+        assert steam_key_in(value) == key
+
+    @pytest.mark.parametrize("item,steam", [
+        ({"drm": ["steam"]}, True),
+        ({"name": "A game"}, True),
+        ({"drm": ["epicgames"]}, False),
+        ({"drm": ["gog"]}, False),
+    ])
+    def test_a_key_goes_to_steam_only_when_nothing_says_otherwise(self, item, steam):
+        assert fanatical_item_is_steam(item) is steam
+
+    def test_both_calls_use_the_sites_own_token(self):
+        for js in (FAN_ORDERS_JS, FAN_REVEAL_JS):
+            assert "localStorage.getItem('bsauth')" in js and "authorization: auth.token" in js
+        assert "/api/user/orders/redeem" in FAN_REVEAL_JS and "atok" in FAN_REVEAL_JS
+
+    def test_a_key_is_revealed_only_after_the_bots_own_claim(self):
+        block = TestFanaticalClaimHonesty.BLOCK
+        owned = block.split("if owned:", 1)[1].split("if cfg.dryrun:", 1)[0]
+        assert "_fanatical_reveal_key" not in owned
+        assert block.index("_fanatical_reveal_key") > block.index("if claimed:")
+
+    def test_a_key_waiting_for_steam_keeps_its_claimed_row(self):
+        source = TestFanaticalClaimHonesty.SOURCE
+        remember = source.split("async def _remember_fanatical", 1)[1].split("\n    async def ", 1)[0]
+        assert 'status == "existed" and str(obj.status or "").startswith("claimed")' in remember
