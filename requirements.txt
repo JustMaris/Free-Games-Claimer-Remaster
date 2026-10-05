@@ -1,5 +1,6 @@
 # Core browser automation
-nodriver>=0.50.3
+# 0.50.4 ships cdp/service_worker.py with a parameter named `or`, a SyntaxError on import.
+nodriver==0.50.3
 
 # Process cleanup (kill orphaned Chrome process trees)
 psutil>=7.2.2
