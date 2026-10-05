@@ -919,6 +919,15 @@ class EpicGamesClaimer(BaseClaimer):
                 await session.commit()
                 return
 
+            # Region-locked pages replace the h1 with Epic's notice, so name the game from the slug.
+            if not btn_text and "unavailable in your platform or region" in title.lower():
+                title = re.sub(r" [0-9a-fA-F]{6}$", "", game_id.replace("-", " ")).title()
+                logger.info("'%s' is unavailable in your platform or region, skipping.", title)
+                obj.title = notify_game["title"] = title
+                obj.status = notify_game["status"] = "skipped:region"
+                await session.commit()
+                return
+
             if not btn_text:
                 logger.warning("No purchase/claim button found for '%s'.", title)
                 obj.status = "failed"
