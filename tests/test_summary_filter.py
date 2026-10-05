@@ -21,11 +21,17 @@ GAMES = [
     {"title": "Dry", "url": "", "status": "available (dry run)"},
     {"title": "Download once", "url": "", "status": "download only, nothing to claim 📥"},
     {"title": "Download again", "url": "", "status": "skipped:download-only"},
+    {"title": "Flagged", "url": "", "status": "failed, only 1 coin(s) offered (bot flag), collect in the app today 🚫"},
+    {"title": "GOG refused", "url": "", "status": "failed: Giveaway is over"},
 ]
+
+FAILURES = {"Missing base", "Broken", "Flagged", "GOG refused"}
 
 
 class _Cfg:
-    def __init__(self, fails=False, owned=False, missing_base=True, download_only=True):
+    """Same defaults as src/core/config.py."""
+
+    def __init__(self, fails=True, owned=False, missing_base=True, download_only=True):
         self.notify_claim_fails = fails
         self.notify_already_claimed = owned
         self.notify_missing_base = missing_base
@@ -53,18 +59,17 @@ def summary_filter():
     return run
 
 
-def test_defaults_show_only_real_changes(summary_filter):
-    assert summary_filter(_Cfg()) == ["Claimed", "Dry", "Download once"]
+def test_defaults_show_changes_and_failures(summary_filter):
+    assert set(summary_filter(_Cfg())) == {"Claimed", "Dry", "Download once"} | FAILURES
 
 
-def test_claim_fails_can_be_switched_on(summary_filter):
-    titles = summary_filter(_Cfg(fails=True))
-    assert "Missing base" in titles and "Broken" in titles
-    assert "Owned" not in titles
+def test_claim_fails_can_be_switched_off(summary_filter):
+    # AliExpress and GOG used to write failures without the word, so they stayed whatever you set.
+    assert summary_filter(_Cfg(fails=False)) == ["Claimed", "Dry", "Download once"]
 
 
 def test_already_claimed_can_be_switched_on(summary_filter):
-    titles = summary_filter(_Cfg(owned=True))
+    titles = summary_filter(_Cfg(fails=False, owned=True))
     assert "Owned" in titles and "Checked in" in titles and "F2P" in titles
     assert "Broken" not in titles
 
@@ -83,7 +88,7 @@ def test_both_switches_on_show_everything(summary_filter):
 
 
 def test_dry_run_entries_are_never_filtered_out(summary_filter):
-    for cfg in (_Cfg(), _Cfg(fails=True), _Cfg(owned=True), _Cfg(True, True)):
+    for cfg in (_Cfg(), _Cfg(fails=False), _Cfg(owned=True), _Cfg(False, True)):
         assert "Dry" in summary_filter(cfg)
 
 
@@ -123,22 +128,24 @@ class TestWhatNeededYou:
     """A store that waited for you and gave up has to say so somewhere you will see it."""
 
     SOURCE = MAIN_PY.read_text(encoding="utf-8")
+    LINE = next(line for line in SOURCE.splitlines() if line.strip().startswith("stuck = "))
+    AFTER = SOURCE.split(LINE, 1)[1][:400]
 
     def test_the_section_is_built_from_the_run_state(self):
-        assert "stuck = waiting_for_you()" in self.SOURCE
+        assert "waiting_for_you()" in self.LINE
+
+    def test_a_silenced_store_stays_out_of_it(self):
+        assert "cfg.store_notify_enabled(name)" in self.LINE
 
     def test_it_is_silent_when_nothing_waited(self):
-        block = self.SOURCE.split("stuck = waiting_for_you()", 1)[1][:400]
-        assert "if stuck:" in block
+        assert "if stuck:" in self.AFTER
 
     def test_it_says_the_store_and_how_much_it_missed(self):
-        block = self.SOURCE.split("stuck = waiting_for_you()", 1)[1][:400]
-        assert "waiting for you" in block and "{count} skipped" in block
+        assert "waiting for you" in self.AFTER and "{count} skipped" in self.AFTER
 
     def test_it_is_not_filtered_like_a_game(self):
         # "skipped" in a game status is dropped by default, so this line is its own section.
-        filter_at = self.SOURCE.index("relevant_games = [")
-        assert self.SOURCE.index("stuck = waiting_for_you()") > filter_at
+        assert self.SOURCE.index(self.LINE) > self.SOURCE.index("relevant_games = [")
 
     def test_every_run_starts_without_yesterdays_note(self):
         assert "reset_run_state()" in self.SOURCE

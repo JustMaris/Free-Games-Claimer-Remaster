@@ -85,6 +85,12 @@ class TestMasking:
 
 
 class TestSettingsWarnings:
+    @pytest.fixture(autouse=True)
+    def _no_retired_switch_from_a_developers_env(self, monkeypatch):
+        # A local .env is loaded into the environment on import and would add a warning to every test.
+        for name in C._RETIRED_SWITCHES:
+            monkeypatch.delenv(name, raising=False)
+
     def _warn(self, monkeypatch, settings):
         monkeypatch.setattr(C, "env_file_settings", lambda: settings)
         return C.settings_warnings()
@@ -92,6 +98,28 @@ class TestSettingsWarnings:
     def test_an_invented_setting_is_named(self, monkeypatch):
         warnings = self._warn(monkeypatch, {"STEAM_ENABLE": "false"})
         assert len(warnings) == 1 and warnings[0].startswith("STEAM_ENABLE ")
+
+    @pytest.mark.parametrize("name", ["FANATICAL_ENABLE", "ITCHIO_ENABLE", "INDIEGALA_ENABLE", "ALIENWARE_ENABLE"])
+    def test_the_retired_side_store_switches_are_named(self, monkeypatch, name):
+        # Kept for one release after 1.9 and gone in 1.11: whoever still has one hears it does nothing.
+        warnings = self._warn(monkeypatch, {name: "true"})
+        assert len(warnings) == 1 and "is not a setting this bot reads" in warnings[0]
+
+    def test_timeout_is_gone_and_named(self, monkeypatch):
+        # Only a helper no store called read it, so it never changed a thing (removed in 1.11).
+        assert not hasattr(C.cfg, "timeout")
+        warnings = self._warn(monkeypatch, {"TIMEOUT": "60"})
+        assert warnings == ["TIMEOUT is not a setting this bot reads, so it does nothing."]
+
+    def test_a_retired_switch_passed_as_a_variable_is_named_too(self, monkeypatch):
+        # docker compose hands .env over as variables, so no file inside the container ever lists it.
+        monkeypatch.setenv("FANATICAL_ENABLE", "true")
+        warnings = self._warn(monkeypatch, {})
+        assert warnings == ["FANATICAL_ENABLE is not a setting this bot reads, so it does nothing."]
+
+    def test_it_is_named_once_when_both_places_have_it(self, monkeypatch):
+        monkeypatch.setenv("FANATICAL_ENABLE", "true")
+        assert len(self._warn(monkeypatch, {"FANATICAL_ENABLE": "true"})) == 1
 
     @pytest.mark.parametrize("settings", [
         {"STORES": "steam,epic"},

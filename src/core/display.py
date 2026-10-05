@@ -76,3 +76,32 @@ class DisplayManager:
 
 
 display_manager = DisplayManager()
+
+
+def screen_state() -> str:
+    """One readable summary of the screen, for the log."""
+    number = os.getenv("DISPLAY", ":1").rsplit(":", 1)[-1].split(".", 1)[0]
+    proc = display_manager._process
+    return (f":{number} socket={os.path.exists(f'/tmp/.X11-unix/X{number}')} "
+            f"Xvfb={bool(proc and proc.poll() is None)} leases={display_manager._leases}")
+
+
+def running_as() -> str:
+    """The user this process runs as, which on a NAS is often not root."""
+    try:
+        import pwd
+        return f"{pwd.getpwuid(os.getuid()).pw_name}({os.getuid()})"
+    except Exception:
+        return "unknown"
+
+
+def free_memory() -> str:
+    """Memory the kernel says is still available, the usual reason Chrome dies at once."""
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return f"{int(line.split()[1]) / 1_000_000:.1f} GB available"
+    except Exception:
+        pass
+    return "unknown"

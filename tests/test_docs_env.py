@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_EXAMPLE = (ROOT / ".env.example").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 
-# Handled by Docker, not by config.py: the image tag and TurboVNC's own password.
-DOCKER_ONLY = {"FGC_TAG", "VNC_PASSWORD"}
+# Handled by Docker, not by config.py: the image tag, TurboVNC's own password and the user the entrypoint switches to.
+DOCKER_ONLY = {"FGC_TAG", "VNC_PASSWORD", "PUID", "PGID"}
 
 
 def _config_vars() -> list[str]:

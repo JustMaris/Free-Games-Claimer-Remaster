@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from src.stores.epic import PAGE_STATE_JS, is_owned
+from src.stores.epic import (PAGE_STATE_JS, is_owned, is_region_locked, region_locked_status,
+                             title_from_slug)
 
 
 class TestOwnedState:
@@ -46,6 +47,46 @@ class TestPageStateOrder:
     def test_the_reader_returns_json(self):
         # page.evaluate() hands back a CDP structure for a plain object, a string survives.
         assert PAGE_STATE_JS.strip().startswith("JSON.stringify(")
+
+
+class TestAGameBlockedInYourRegion:
+    """BURIED STARS, 4.10: claimed on 1.10, then Epic blocked it in Poland and showed only a sentence."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py").read_text(encoding="utf-8")
+    CLAIM = SOURCE.split("async def _claim_game", 1)[1].split("\n    async def ", 1)[0]
+
+    def test_the_page_is_recognised(self):
+        assert is_region_locked({"flow": "region", "text": ""})
+        assert not is_region_locked({"flow": "unknown", "text": ""})
+        assert not is_region_locked(None)
+        assert "unavailable in your platform or region" in PAGE_STATE_JS
+
+    def test_it_is_checked_after_every_real_button(self):
+        # A product page with a button is never mistaken for the blocked one.
+        assert PAGE_STATE_JS.index("'region'") > PAGE_STATE_JS.index("'owned'")
+
+    @pytest.mark.parametrize("previous,expected", [
+        ("claimed", "existed"), ("existed", "existed"),
+        ("unknown", None), ("failed", None), ("skipped:region", None), (None, None),
+    ])
+    def test_a_game_you_took_stays_owned_the_rest_stays_quiet(self, previous, expected):
+        assert region_locked_status(previous) == expected
+
+    def test_the_sentence_never_becomes_the_title(self):
+        # The heading is read after the region check, so Epic's sentence cannot be stored as the name.
+        assert self.CLAIM.index("is_region_locked(state)") < self.CLAIM.index("document.querySelector('h1')")
+
+    @pytest.mark.parametrize("slug,title", [
+        ("buried-stars-d7c88c", "Buried Stars"),
+        ("system-shock-2-25th-anniversary-remaster-cb94d9", "System Shock 2 25Th Anniversary Remaster"),
+        ("fortnite", "Fortnite"),
+    ])
+    def test_a_name_from_the_address_when_nothing_else_has_one(self, slug, title):
+        assert title_from_slug(slug) == title
+
+    def test_a_gamerpower_find_on_epics_own_list_is_not_checked_twice(self):
+        run = self.SOURCE.split("async def run", 1)[1].split("\n    async def ", 1)[0]
+        assert "already handled" in run and "in handled" in run
 
 
 class TestClaimHonesty:
@@ -185,3 +226,43 @@ class TestRecoveryCodeBookkeeping:
         source = (Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py").read_text(encoding="utf-8")
         loop = source.split("otp_tried = 0", 1)[1].split('if "login/review"', 1)[0]
         assert loop.index("_fill_backup_code()") < loop.index("mfa_manual = True")
+
+
+class TestTheCheckoutCaptcha:
+    """Issue #61: a captcha inside Epic's checkout frame held the order and nobody was told."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py").read_text(encoding="utf-8")
+    CLAIM = SOURCE.split("async def _claim_game", 1)[1].split("async def _handle_new_checkout", 1)[0]
+    CHECKOUT = SOURCE.split("async def _handle_new_checkout", 1)[1].split("\n    async def ", 1)[0]
+
+    def test_the_checkout_frame_is_searched_too(self):
+        # The page check only sees the top document, verified against a real browser.
+        look = self.SOURCE.split("async def _checkout_challenge_present", 1)[1].split("\n    async def ", 1)[0]
+        assert "_find_purchase_frame(" in look and "CHALLENGE_JS" in look
+
+    def test_it_is_checked_before_the_page_text_can_read_as_success(self):
+        assert self.CHECKOUT.index("_clear_checkout_challenge(title)") < self.CHECKOUT.index("already_done = await")
+
+    def test_the_final_check_waits_for_it_too(self):
+        verify = self.CHECKOUT.split("Step 4: Verify claim success", 1)[1]
+        assert verify.index("_clear_checkout_challenge(title)") < verify.index("success = await")
+
+    def test_nothing_leaves_the_page_while_one_is_up(self):
+        # Checking ownership opens the product page, which would drop an order still waiting.
+        assert self.CLAIM.index("_clear_checkout_challenge(title)") < self.CLAIM.index("_confirm_in_library(url)")
+
+    def test_a_claim_that_did_not_land_reaches_you(self):
+        tail = self.CLAIM.split("_confirm_in_library(url)", 1)[1]
+        assert 'notify_game["status"] = "notified"' in tail
+        assert "needs_you(self.store_name)" in tail
+        assert 'notify_game["status"] = "failed"' not in tail
+
+
+class TestNoConsentIsGivenForYou:
+    """Seen live on 28.09: after Get, Epic's final step offers "Share my email with Ubisoft"."""
+
+    SOURCE = (Path(__file__).resolve().parent.parent / "src" / "stores" / "epic.py").read_text(encoding="utf-8")
+
+    def test_only_the_licence_box_is_ever_ticked(self):
+        assert 'input[type="checkbox"]' not in self.SOURCE
+        assert self.SOURCE.count("querySelector('input#agree')") == 2

@@ -58,6 +58,8 @@ ENV NOVNC_PORT=7080
 ENV VNC_IDLE_TIMEOUT=60
 EXPOSE 7080
 
+# DISPLAY here too, so a "docker exec" command also finds the screen.
+ENV DISPLAY=:1
 ENV WIDTH=1280
 ENV HEIGHT=720
 ENV DEPTH=24

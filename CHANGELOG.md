@@ -1,27 +1,91 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-Format based on [Keep a Changelog](https://keepachangelog.com/).
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project does not follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html): every release raises the number after the dot (1.10, 1.11), and a development build carries the same number with a `d` suffix (`v1.11d`).
 
 ## [Unreleased]
 
-### Fixed
-- **Chromium launch no longer fails with "Arguments can not specify page to be opened"**: `--disk-cache-dir` is now one `--disk-cache-dir=<path>` arg, and the invalid `viewport`/`no_viewport` parameters were removed from `launch_persistent_context`.
-- **The V8 heap cap actually applies**: `--js-flags=--max-old-space-size=512` is passed as one arg again. Split into two args, Chromium silently ignored it.
-- **Scheduled runs time out after an hour**: APScheduler 3 ignores a `timeout` job default, so the run is now wrapped in `asyncio.timeout(3600)`. A hung store can no longer block every later run.
-- **The container healthcheck works while noVNC is up**: it checks that port 7080 accepts connections instead of fetching `/status.json`, which websockify doesn't serve. `VNC_MODE=on` used to leave the container permanently unhealthy.
-- **`BaseClaimer` tests pass again**: removed the `__slots__` that made `store_name` read-only on instances.
-
 ### Changed
-- **`VNC_MODE` defaults to `auto`** everywhere. The image already set it; config, README and `.env.example` said `on`.
-- **Back on nodriver, with Google Chrome on amd64.** The fork's move to Playwright (and then patchright) got an hCaptcha in Epic's checkout iframe on every claim: 0 unattended Epic claims from Oct 1 to Oct 3. On the same account and profile, upstream v1.9 (nodriver with Chrome) claimed the same pending games unattended. The fork keeps its engine-independent changes: on-demand Xvfb and VNC, status page, CI, Docker slimming, alert fixes. `--restore-last-session` is back too, so GOG sessions survive restarts again.
-- **Epic checkout captcha hands over to VNC**: an on-screen hCaptcha inside the cross-origin purchase frame is now detected, and you get the usual alert instead of a silent timeout.
-- **CI runs the test suite** on Python 3.14 (the image's version) whenever Python files change. PR images are built by `docker-ghcr.yml`, so the duplicate `docker-pr-build.yml` is gone.
-- **Docker resource limits**: CPU (2) and memory (4GB) limits in `docker-compose.yml`.
-- `close_browser()` also sweeps orphaned Chromium processes tied to the store's profile.
+- **The screen and VNC start only when needed** – Xvfb runs while a visible browser is open, and x11vnc/noVNC start for a manual step and stop after `VNC_IDLE_TIMEOUT`. `VNC_MODE` picks `on`, `auto` (default) or `off`; with `off` manual steps are skipped. TurboVNC and `start-vnc.sh` are gone; `PUID`/`PGID` from 1.11 still apply.
+- **A status page on port 7080** – while noVNC is down, the port serves `status.json` and a small page with the last run's state.
+- **Python 3.14 image with Google Chrome on amd64** (Debian Chromium on arm64). nodriver 0.50.3 has a byte Python 3.12+ refuses to import, so the build patches it.
+- **CI runs the test suite** on Python 3.14 whenever Python files change, and pull requests build the image.
+- **Docker resource limits** – CPU (2) and memory (4GB) limits in `docker-compose.yml`.
 
 ### Removed
-- Unused timing constants in store modules, `src/types.py`, the no-op GPU-flag filter, and the duplicate compose healthcheck.
+- The duplicate compose healthcheck.
+
+### Fixed
+- **The V8 heap cap applies** – `--js-flags=--max-old-space-size=512` is one argument; split in two, Chrome ignored it.
+- **A scheduled run stops after an hour** – APScheduler 3 ignores a `timeout` job default, so the run is wrapped in `asyncio.timeout(3600)` and a hung store can no longer block every later run.
+- **The healthcheck works while noVNC is up** – it checks that port 7080 accepts connections instead of fetching `/status.json`, which websockify does not serve.
+- **Notification tokens stay out of the debug log** – `urllib3` and `requests` are quiet with `DEBUG=true`; they logged the full Telegram bot URL.
+- **No "child process pid" warning after every run on Python 3.12+** – the reaped-child log filter matches the newer wording too.
+
+## [1.11] - 2026-10-05
+
+### Added
+- **Run the container as your own user ([#58](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/58))** – set `PUID` and `PGID` and `docker-entrypoint.sh` hands the data folder to that user once, then runs the screen, the viewer and the bot as it, so files in a mounted folder belong to you on the host. Leave them out and nothing changes.
+- **Fanatical giveaways end up on your Steam account** – `_claim_fanatical_game()` in `src/stores/gamerpower.py` checks your Fanatical orders before and after a claim and reveals only that giveaway's key. With `steam` in `STORES`, `redeem_pending_keys()` in `src/stores/steam.py` activates it at the end of the run.
+
+### Changed
+- **The log says how long the IndieGala sign-in lasts** – IndieGala keeps a sign-in for 14 days from the login and visits do not extend it, so the bot logs the end date and warns two days ahead that the next IndieGala giveaway will ask you for the captcha again.
+- **Chrome closes cleanly before it is killed (PR [#60](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/60) by @zaryar)** – `close_browser()` in `src/core/claimer.py` asks Chrome to shut down first, so cookies and sessions reach the disk before the leftover processes are ended. Every store stayed signed in on the next run.
+- **Microsoft always gets a window (PR [#60](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/60) by @zaryar)** – `src/stores/microsoft.py` starts Chrome visibly, like Epic, because Microsoft's account pages fail without one. It only matters when `SHOW=false`.
+- **Fab is opt-in** – `fab` left `DEFAULT_STORES` in `main.py`, so like Unity it runs only when `STORES` names it. If your `STORES` is empty and you want Fab's free assets, add `STORES=steam,epic,fab,prime,gog,microsoft,ubisoft,aliexpress`.
+- **Failed claims are in the summary by default** – `NOTIFY_CLAIM_FAILS` now defaults to `true`, so a game or check-in the bot could not take is listed with the reason instead of vanishing. That also makes `NOTIFY_MISSING_BASE` work as described; set `NOTIFY_CLAIM_FAILS=false` to hide failures again.
+- **A shorter `.env.example`** – every setting keeps its line, now with a one-line hint instead of a paragraph; the full description is in the README table. Microsoft is no longer called off by default, and the notification switches lost their end-of-line comments, which `docker run --env-file` kept as part of the value.
+- **Dependency updates** – `sqlalchemy` to `>=2.1.0` (Dependabot [#64](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/64)). Checked against a copy of a live database: reading, the bot's queries and `get_or_create()` behave exactly as on 2.0.
+
+### Removed
+- **`TIMEOUT` is gone** – it was meant as the wait for a page element, but only a helper no store ever called read it, so changing it did nothing. Every store keeps its own waits; a `TIMEOUT` left in `.env` is named at startup as a setting the bot does not read.
+- **The old `*_ENABLE` store switches are gone** – `FANATICAL_ENABLE`, `ITCHIO_ENABLE`, `INDIEGALA_ENABLE` and `ALIENWARE_ENABLE` were replaced by `STORES` in 1.9 and kept for one more release. They do nothing now and the log says so at startup; name the site in `STORES`, e.g. `STORES=...,fanatical`, to keep it running.
+
+### Fixed
+- **IndieGala signs in and claims again** – `_claim_indiegala_game()` in `src/stores/gamerpower.py` never found IndieGala's e-mail field, and once signed in it took every giveaway as owned from a hint all its pages carry. It types the sign-in now, hands the login captcha to you over VNC, and counts a game only when the reloaded page says it is yours.
+- **A quoted password works everywhere** – a `.env` value written as `'secret'` reached the bot with its quotes when the container was started with `docker run --env-file` or a NAS form, so sign-ins failed. `src/core/config.py` takes one matching pair of quotes off every setting it knows; compose and a plain `.env` behave as before.
+- **A container started as another user gets its screen** – NAS templates that set a user for the container left VNC without a home folder it could write, so the screen never came up. `docker-entrypoint.sh` gives such a user one in `/tmp`, so the bot runs whenever the data folder is writable.
+- **A captcha in Epic's checkout now reaches you ([#61](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/61))** – after "Add to library" Epic sometimes shows an hCaptcha inside the checkout window, where the bot never looked. `_checkout_challenge_present()` in `src/stores/epic.py` looks there too, asks you over VNC and finishes the order once it is solved.
+- **An Epic claim that did not land is reported ([#61](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/61))** – when the store page does not confirm the game, the summary lists it as `notified` with a link instead of hiding it with the failures, so you can take it yourself.
+- **Epic never ticks a consent box for you** – the licence step in `_handle_new_checkout()` ticked the first checkbox on the page, and after "Get" that can be "Share my email with Ubisoft". It only touches Epic's own licence box now.
+- **Ubisoft's reCAPTCHA reaches you** – when Ubisoft doubts a sign-in it shows a reCAPTCHA picture challenge that the captcha check in `src/core/claimer.py` did not recognise, so the bot gave up and asked you to sign in again. It now asks you to solve the challenge and waits on the same page.
+- **Two more human checks are recognised (PR [#60](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/60) by @zaryar)** – `_human_challenge_present()` also knows DataDome's captcha and Cloudflare's "review the security of your connection" page, so they reach you over VNC instead of stalling a store.
+- **A failed Ubisoft sign-in shows up in the summary (PR [#60](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/60) by @zaryar)** – the giveaways it held back are listed as `failed:login-required` instead of disappearing.
+- **Itch.io no longer asks you to sign in while you are signed in ([#59](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/59))** – `_itch_session_ready()` in `src/stores/gamerpower.py` judged the session while Cloudflare's "Just a moment" page was still up. It lets that page clear first, and the prompts for Itch.io, Fanatical and IndieGala name the site instead of "gamerpower".
+- **A VNC password no longer stops the container ([#67](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/67))** – since 1.10 `start-vnc.sh` left the password file readable by everyone, TurboVNC refused it and the container restarted forever whenever `VNC_PASSWORD` was set. The file is private now.
+- **`PUID` with dropped capabilities explains itself ([#58](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/58))** – with `cap_drop: ALL` the switch to your user failed silently and the container restarted forever. `docker-entrypoint.sh` now says to add `CHOWN`, `SETUID` and `SETGID` back with `cap_add` and keeps running as root until you do.
+- **Unity finds the asset it bought** – since 1 October the giveaway link carries only the asset's number, which `_package_id()` in `src/stores/unity.py` did not read, so the bot could not check ownership: it reported its own claim as unconfirmed and then failed at the checkout every run. The name now comes from the asset page too.
+- **A game Epic blocks in your region is no longer a failed claim** – on Epic's "unavailable in your platform or region" page `_claim_game()` in `src/stores/epic.py` reported that sentence as a failed game. It now keeps the real name, leaves a game you own as owned and skips the rest quietly, and checks a game GamerPower also lists only once.
+- **Steam's "Remember me" is read properly ([#65](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/65))** – the login form draws it as a styled box, so `_do_login()` in `src/stores/steam.py` never found it. It now leaves Steam's own tick alone and ticks the box only when it is off.
+- **A GOG code that is mid-redemption is tried again ([#66](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/66))** – on "This code is currently being redeemed by someone" `_redeem_gog_code()` in `src/stores/gog.py` checks the sign-in and tries once more, otherwise it keeps the code for the next run instead of asking you to check it by hand.
+- **An itch.io sale that ended stays out of the summary** – GamerPower keeps listing an itch.io giveaway after the price comes back, and the bot reported it as a failed claim every run. It now only notes in the log that the game is not free right now.
+- **The notification switches keep their word** – `NOTIFY_SKIP_STORES` takes every name `STORES` takes and also silences the GamerPower sites and the "Needed you" line. `NOTIFY_ERRORS=false` stops the crash alert in `main.py`, AliExpress and GOG failures follow `NOTIFY_CLAIM_FAILS`, and Epic and AliExpress no longer send a failure twice.
+- **Steam no longer adds a game's demo ([#62](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/62))** – checking a free DLC's base game, `_ensure_base_game()` in `src/stores/steam.py` could click the demo's button, and the free check could take a demo block for the giveaway. Demo blocks are skipped everywhere now, and the "costs 0.00" check, which never matched, works.
+
+## [1.10] - 2026-09-23
+
+### Added
+- **Microsoft Store and Xbox** – `src/stores/microsoft.py` redeems the Microsoft codes Prime Gaming hands out and claims paid games while they are free to keep, never free to play or Game Pass titles. It signs in by itself, two-step verification included (`MS_OTP_KEY`). It runs by default and opens a browser only when there is something to take.
+- **One pass and the bot stops ([#51](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/51))** – `RUN_ONCE=true`, or `SCHEDULER_HOURS=0` with no fixed times, claims everything once and exits, so cron, Ofelia or a NAS task decides when it runs. Set `restart: "no"` in your compose file, or Docker starts it again.
+
+### Changed
+- **The log says who the container runs as** – the first line names the user and whether the data folder is writable, TurboVNC and noVNC print their own errors, and a failed Chrome start also reports the screen, user and free memory.
+- **Dependency updates** – `sqlalchemy` to `>=2.0.54` and `tzdata` to `>=2026.4` (Dependabot [#55](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/55)).
+
+### Removed
+- **`PG_REDEEM` is gone** – nothing read it. Codes from Prime are redeemed whenever GOG or Microsoft is in `STORES`.
+
+### Fixed
+- **One game title can no longer sink the whole notification** – `format_game_list()` in `src/core/notifier.py` shows `<` `>` as ‹ › and escapes a stray `_` or `*`, because Telegram dropped a whole message over a title like `Doom <Remastered>`.
+- **Prime promises an automatic redeem only when one will happen** – GOG and Microsoft codes say `pending auto-redeem` only when that store runs in the same session, otherwise the bare code, which you redeem yourself.
+- **A captcha you never had no longer stops the sign-in** – `_human_challenge_present()` counted Epic's hidden hCaptcha frame, so Epic and Fab asked you to solve a check that was not there. Only a visible one counts now, and after you clear a real one the bot sends the form itself.
+- **Ubisoft giveaways under a new name ([#57](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/57))** – `src/stores/ubisoft.py` also accepts the `giveaway` type the feed switched to, which had made it skip For Honor. Trials, demos and free weekends stay out.
+- **Ubisoft's "Welcome back!" screen no longer calls you** – when Ubisoft remembers the account, its sign-in page shows only a Continue button, and `_do_login()` in `src/stores/ubisoft.py` waited for an e-mail field instead. It presses Continue now and fills in only what Ubisoft still asks for.
+- **Two browsers no longer share one profile ([#38](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/38))** – a Chrome left over from an earlier run is closed before the new one starts, not after a launch has already failed.
+- **A dead screen no longer takes the browser and VNC with it ([#52](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/52))** – the bot checks TurboVNC's screen before opening a window and restarts it with the new `start-vnc.sh`, instead of every store failing with "Failed to connect to browser". If that fails it says why once, with details in `data/TurboVNC.log`.
+- **Telegram showed `**` instead of bold text ([#50](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/50))** – `send_apprise()` in `src/core/notifier.py` now tells Apprise the message is markdown, so Telegram shows bold and e-mail gets HTML. `ntfy://` addresses get `format=markdown` unless you set a format yourself.
+- **GOG signed you in as "account" ([#38](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/38))** – `_is_logged_in()` in `src/stores/gog.py` took the menu button's text as proof of a session. It now asks GOG's account service, which returns your username or nothing.
 
 ## [1.9] - 2026-09-11
 
@@ -38,11 +102,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **GamerPower is no longer a store you pick** – it is asked once per run and its finds go to the store they belong to, claimed in that store's own session, so `STORES=steam` also takes the Steam giveaways it lists. Itch.io, Fanatical, IndieGala and Alienware Arena are names in `STORES` now, each still needing an account there; the old `*_ENABLE` switches work for one more release.
 - **One recovery-code implementation instead of three** – picking the first unused code and recording it lived separately in `gog.py`, `gamerpower.py` and `claimer.py`. GOG and Itch.io now call the shared `BaseClaimer` helpers, so all three stores count, skip and remember codes the same way.
 - **`UNKNOWN_STORES_ENABLE` is now `GP_UNKNOWN_STORES`** – opening a site nobody mapped is not built yet, so the setting stays off whatever you put in it and says so once in the log. The old name keeps working and tells you what it is called now.
-- **`PG_CLAIMDLC` is gone** – nothing in the Python rewrite ever read it, and Amazon has retired that section: `gaming.amazon.com` now offers only games and Luna. Dropped rather than left as a switch that does nothing.
 - **Epic reports a missing base game the way Steam does** – it said `requires base game` while Steam said `failed:missing_base`, so no single setting could cover both stores. Both use the Steam wording now.
 - **Dependency update** – `apprise` to `>=1.13.1` (Dependabot [#42](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/42)), which fixes in-memory e-mail attachments. The `<2.0.0` cap from 1.8 held.
 - **The bug report instructions say what to actually send** – the README now names the log file and the folder it lands in, asks you to check your version first, and tells you to try a clean start and send both logs when the fault survives it.
 - **A Chrome that refuses to start now leaves evidence** – the run used to end on `Chrome failed to start after 3 attempts` and nothing else. It now logs the binary and its version, the profile path, whether that folder is writable and how much disk is free, then starts Chrome by hand and quotes what it printed, which nodriver otherwise swallows.
+
+### Removed
+- **`PG_CLAIMDLC` is gone** – nothing in the Python rewrite ever read it, and Amazon has retired that section: `gaming.amazon.com` now offers only games and Luna. Dropped rather than left as a switch that does nothing.
 
 ### Fixed
 - **A store that waited for you in vain is left alone for the rest of the run** – every manual step got its own full `VNC_LOGIN_TIMEOUT`, so one run could sit for hours re-opening the same sign-in page, which is exactly what lowers a session's standing there. An unanswered prompt now ends that store's manual steps for the run, a prompt you answered costs it nothing, and the summary says what was skipped.
@@ -115,6 +181,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Unit test suite (`tests/`)** – covers logic with no browser or network dependency: AliExpress coin/check-in payload parsing, Epic mobile offer detection, redirect host checks, the notification summary filter, and `.env` parsing. Two regressions in this category were caught by these tests during development. Runs via `python -m pytest tests/ -q` in under a second.
 - **Epic mobile free-game claiming (`src/stores/epic_mobile.py`, [#23](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/23))** – Epic's weekly Android/iOS giveaway does not appear in the `freeGamesPromotions` API the bot polls, so it was never claimed. A new module queries Epic's mobile storefront listing (`egs-platform-service…/discover/home?platform=android|ios`) and passes the URLs to the existing Epic claimer, which claims them on the same store pages used for PC titles, requiring no additional login, browser profile, or captcha exposure. Only offers with an active free `Claim` entry are taken (the same catalog item also carries a full-price entry for after the promotion ends). Android and iOS are distinct SKUs and both are claimed by default; controlled by `EG_MOBILE` and `EG_MOBILE_PLATFORMS`. Since both platforms share a title, claims are labelled `Foretales (Android)` / `Foretales (iOS)` in logs, the summary notification, and the database.
 
+### Changed
+- **Log output overhauled: quieter by default, `DEBUG=true` limited to the bot, library internals moved to `DEBUG_LIBS`** – a normal run logged detail that matters only while debugging: AliExpress alone emitted roughly 40 `🔬 Coin API` lines plus `🔎 Anti-bot diagnostics`, `🚧 Blocked app schemes`, and a running account of each login keystroke; Epic narrated every checkout click; GOG logged its login wait loop; GamerPower logged a processing and a routing line per giveaway; Prime logged internal session-recovery steps; Discord logged every message chunk sent. All of this moved to `debug` level, so the default log now reports only which store is running, sign-in status, games found, claim/skip outcomes, and warnings/errors. `DEBUG=true` itself was further diluted by library internals, every WebSocket frame exchanged with Chrome, HTTP handshakes with full response headers, SQLite calls, and SQLAlchemy printing each `BEGIN`/`PRAGMA`/`COMMIT` twice (its own `echo` handler ran alongside the app's), a single run could reach tens of thousands of lines. `main.py` now keeps those loggers at warning level unless the new `DEBUG_LIBS=true` is set, so `DEBUG=true` (on by default) reports only the bot's own actions: browser launch parameters, database inserts/hits, which SteamDB cards were skipped and why, Prime's offer-container diagnostics (previously dead code in a comment), GamerPower's resolved redirect target, AliExpress' check-in widget polling, Epic's mobile detection, and a credential-free settings dump at startup. Also filtered: a spurious `Unknown child process pid …, will report returncode 255` warning, raised by Python's asyncio child watcher noticing a Chrome process already reaped by `close_browser()`'s cleanup (added in `1.4`).
+- **AliExpress check-in notification format** – all values were packed into a single bracket, so `claimed 50 🪙 (+12 tomorrow · 1,040 total)` read as tomorrow bringing 12 *additional* coins rather than a total. Each value is now labelled individually: `claimed 50 🪙, streak 5 days, tomorrow 12 🪙, balance 1,040 🪙`; values the page does not report are omitted rather than estimated.
+- **AliExpress streak and next-day reward now read from the check-in calendar** – both values were guessed by matching field *names* in the captured responses, which reported the wrong number: a live capture showed the notification claiming "tomorrow 13 🪙" when the actual next-day reward was 50, the 13 having come from a day counter picked up by the page-text fallback. `coin.channel.sign.list` in fact returns a `dailySignNodeList` with one entry per day, keyed by `calendarDayDistance` (0 = today, 1 = tomorrow), each carrying its own prize and a `sequenceNumber` counting the streak day. `_extract_checkin_calendar()` reads those exact fields, so the notification now reports `streak 15 days, tomorrow 50 🪙` for the same run. The streak counter is discarded if any visible past day was not signed (it is then not a streak), name-based matching is kept only as a fallback with stricter patterns, and the page-text fallback no longer accepts a bare number near the word "tomorrow" unless it is explicitly labelled as coins.
+- **Shared title-matching helper; SteamDB dump path fixed** – the loose title-comparison helper used for ownership detection existed as identical copies in `steam.py` and `gamerpower.py`; it now lives once in `BaseClaimer`. The SteamDB page dump moved from a hardcoded Linux path (`/fgc/data/steamdb_dump.html`, a silent no-op outside Docker) to the configured data directory, and is written only when `DEBUG=true`.
+- **Dependency updates** - bumped `psutil` to `>=7.2.2`, `apprise` to `>=1.12.0`, and `tzdata` to `>=2026.3` (Dependabot [#26](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/26), [#27](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/27), [#25](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/25)), verified with a `--no-cache` container rebuild and a full claiming run.
+- **GitHub Actions updates** - upgraded `actions/setup-python` usage to `v7` in the dependency-check workflow (Dependabot [#24](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/24)).
+- **`NOTIFY_CLAIM_FAILS` now covers every store and defaults to `false`** – previously guarded only two ad-hoc alerts (AliExpress, Epic), while unclaimable games (e.g. a free Steam DLC requiring an unowned base game, such as "The Mound: Omen of Cthulhu, Lost Explorers' Swords Pack") always appeared in the run summary regardless of store. The summary filter in `main.py` now hides every `failed…` entry from any store unless `NOTIFY_CLAIM_FAILS=true` is set.
+
 ### Fixed
 - **`latest` on the GitHub container registry served v1.1 for four releases** – `docker-ghcr.yml` only published on a *release* event, and releases here are created by `github-actions[bot]`, which GitHub does not let trigger another workflow. `v1.2` to `v1.4` never reached GHCR, so the default `docker-compose.yml` kept pulling the June image. The tag push now triggers the build directly: `v1.5` publishes `v1.5`, `latest` and `main`, `v1.5d` publishes `v1.5d` and `dev`. Three related fixes in the same workflow: a push to `main` no longer rewrites the `dev` tag, GHCR images are built for `linux/arm64` as well (Raspberry Pi), and a per-commit concurrency group stops the same code being built twice.
 - **`DRYRUN=true` did not prevent GamerPower from claiming giveaways** – `gamerpower.py` had no dry-run check, unlike every other store: Fanatical, Itch.io, and IndieGala giveaways were claimed for real, and Alienware ones were silently marked "already notified" and never surfaced again. All four claim paths now stop before the irreversible action, report `available (dry run)`, and leave the database untouched.
@@ -125,36 +200,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **AliExpress check-in notification omitted the day streak and tomorrow's reward** – the notification reported only `claimed 50 🪙 (985 total)`. `aliexpress.py` parsed a single response shape (the `{name, value}` list used by `mtop.aliexpress.coin.execute`, which is why the wallet balance worked), so the actual check-in responses, `coin.channel.sign.list` and `coin.channel.sign.execute`, which carry the streak and next-day reward, were captured but logged as `fields={}` and discarded. A new `_flatten_payload()` reads both response shapes (including JSON-encoded string values); `_extract_checkin_info_from_api()` extracts the streak and tomorrow values, preferring the response from the collect action itself. Page-scraping is now a fallback for whatever the API does not provide, with additional Polish-language patterns added since the page renders these numbers as animated digits. Every captured check-in response is also written to `data/ae_coin_api.json` for diagnostics.
 - **SteamDB "Play For Free" games (e.g. ICARUS) were treated as free-to-keep** – `steam.py`'s `_parse_steamdb_html()` classified a game as keepable by searching each card's HTML for the *text* `Free to Keep`. The last card on the page also captures the page's trailing FAQ ("What is Free to Keep on Steam?") in its slice, so free-weekend/free-to-play titles matched the text, were "claimed", and reported as failures. The parser now matches SteamDB's actual green badge class `cat-free-to-keep` instead of matching free text (verified against a live page dump: keep games are retained; ICARUS and every `cat-play-for-free` card are excluded).
 
-### Changed
-- **Log output overhauled: quieter by default, `DEBUG=true` limited to the bot, library internals moved to `DEBUG_LIBS`** – a normal run logged detail that matters only while debugging: AliExpress alone emitted roughly 40 `🔬 Coin API` lines plus `🔎 Anti-bot diagnostics`, `🚧 Blocked app schemes`, and a running account of each login keystroke; Epic narrated every checkout click; GOG logged its login wait loop; GamerPower logged a processing and a routing line per giveaway; Prime logged internal session-recovery steps; Discord logged every message chunk sent. All of this moved to `debug` level, so the default log now reports only which store is running, sign-in status, games found, claim/skip outcomes, and warnings/errors. `DEBUG=true` itself was further diluted by library internals, every WebSocket frame exchanged with Chrome, HTTP handshakes with full response headers, SQLite calls, and SQLAlchemy printing each `BEGIN`/`PRAGMA`/`COMMIT` twice (its own `echo` handler ran alongside the app's), a single run could reach tens of thousands of lines. `main.py` now keeps those loggers at warning level unless the new `DEBUG_LIBS=true` is set, so `DEBUG=true` (on by default) reports only the bot's own actions: browser launch parameters, database inserts/hits, which SteamDB cards were skipped and why, Prime's offer-container diagnostics (previously dead code in a comment), GamerPower's resolved redirect target, AliExpress' check-in widget polling, Epic's mobile detection, and a credential-free settings dump at startup. Also filtered: a spurious `Unknown child process pid …, will report returncode 255` warning, raised by Python's asyncio child watcher noticing a Chrome process already reaped by `close_browser()`'s cleanup (added in `1.4`).
-- **AliExpress check-in notification format** – all values were packed into a single bracket, so `claimed 50 🪙 (+12 tomorrow · 1,040 total)` read as tomorrow bringing 12 *additional* coins rather than a total. Each value is now labelled individually: `claimed 50 🪙, streak 5 days, tomorrow 12 🪙, balance 1,040 🪙`; values the page does not report are omitted rather than estimated.
-- **AliExpress streak and next-day reward now read from the check-in calendar** – both values were guessed by matching field *names* in the captured responses, which reported the wrong number: a live capture showed the notification claiming "tomorrow 13 🪙" when the actual next-day reward was 50, the 13 having come from a day counter picked up by the page-text fallback. `coin.channel.sign.list` in fact returns a `dailySignNodeList` with one entry per day, keyed by `calendarDayDistance` (0 = today, 1 = tomorrow), each carrying its own prize and a `sequenceNumber` counting the streak day. `_extract_checkin_calendar()` reads those exact fields, so the notification now reports `streak 15 days, tomorrow 50 🪙` for the same run. The streak counter is discarded if any visible past day was not signed (it is then not a streak), name-based matching is kept only as a fallback with stricter patterns, and the page-text fallback no longer accepts a bare number near the word "tomorrow" unless it is explicitly labelled as coins.
-- **Shared title-matching helper; SteamDB dump path fixed** – the loose title-comparison helper used for ownership detection existed as identical copies in `steam.py` and `gamerpower.py`; it now lives once in `BaseClaimer`. The SteamDB page dump moved from a hardcoded Linux path (`/fgc/data/steamdb_dump.html`, a silent no-op outside Docker) to the configured data directory, and is written only when `DEBUG=true`.
-- **Dependency updates** - bumped `psutil` to `>=7.2.2`, `apprise` to `>=1.12.0`, and `tzdata` to `>=2026.3` (Dependabot [#26](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/26), [#27](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/27), [#25](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/25)), verified with a `--no-cache` container rebuild and a full claiming run.
-- **GitHub Actions updates** - upgraded `actions/setup-python` usage to `v7` in the dependency-check workflow (Dependabot [#24](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/pull/24)).
-- **`NOTIFY_CLAIM_FAILS` now covers every store and defaults to `false`** – previously guarded only two ad-hoc alerts (AliExpress, Epic), while unclaimable games (e.g. a free Steam DLC requiring an unowned base game, such as "The Mound: Omen of Cthulhu, Lost Explorers' Swords Pack") always appeared in the run summary regardless of store. The summary filter in `main.py` now hides every `failed…` entry from any store unless `NOTIFY_CLAIM_FAILS=true` is set.
-
 ## [1.4] - 2026-07-21
 
 ### Added
 - **AliExpress bot-flag guard** – new config vars `AE_MIN_COINS`, `AE_FLAG_RETRIES`, `AE_FLAG_WAIT` (default 2, 3, 480s). If check-in offers only 1 coin, bot skips collection and retries instead of wasting the full reward, then notifies you to collect on your phone if it never lifts.
 - **Anti-bot diagnostics in logs** – `🔎 Anti-bot diagnostics` line reports actual `navigator.webdriver`, automation property leaks, AliExpress risk cookies, and challenge detection; `🚧 Blocked app schemes` line lists intercepted attempts for troubleshooting.
 - **Per-store notification toggle (`NOTIFY_SKIP_STORES`)** – silence Discord/Apprise notifications from specific stores while they still run and claim, via a comma-separated denylist of store keys (accepts aliases `ae`/`amazon`/`gp`), e.g. `NOTIFY_SKIP_STORES=aliexpress` stops the daily AliExpress summary. Store notifications now route through `BaseClaimer.notify()` / `cfg.store_notify_enabled()`, and `main.py` filters the summary and crash alerts accordingly.
-
-### Fixed
-- **Captchas suddenly appearing on every store** – enabling the `Page` CDP domain (needed so `addScriptToEvaluateOnNewDocument` isn't silently ignored) made the old hand-rolled desktop stealth JS actually run for the first time, and its HARD-CODED values (`Win32` platform, `NVIDIA GTX 1650` WebGL, fake plugins) don't match the real headful/VNC container (no NVIDIA GPU, Linux), that inconsistency is a bot tell and started triggering captchas across Steam, Epic, GOG and Prime at once. `BaseClaimer.inject_base_stealth` now defaults to `False`, so those stores use nodriver's clean native fingerprint again (verified live: WebGL reports the real renderer, `navigator.webdriver === false`).
-- **Cloudflare / captcha challenges never sent an alert** – a human-check (Cloudflare "Just a moment… / Verify you are human", or an hCaptcha/Arkose login challenge) was either only logged or silently treated as "no games"/"not signed in", with no notification. New shared `BaseClaimer._human_challenge_present()` detects them and `_wait_out_challenge()` first lets a managed challenge auto-pass, then sends a Discord/Apprise push with the VNC link and waits for you to solve it. `epic.py` checks for it up front (Cloudflare can gate `store.epicgames.com` *before* login, otherwise it just looped "attempt 1/3") and again during login; `steam.py` checks it on the SteamDB page instead of silently reporting no free games.
-- **Navigator property spoofs threw mid-injection** – missing `configurable: true` on base stealth properties caused per-store overrides to throw and abort. All navigator spoofs in `src/core/claimer.py` now use `configurable: true` so per-store overrides can layer safely.
-- **`navigator.webdriver` spoofed as `undefined`** – real Chrome never reports `undefined`, always `false`. Now only patches when it's genuinely `true`, spoofing `false` instead.
-- **AliExpress login form not detected in non-English locales** – the email/phone field (localized placeholder, plain `type=text`) and the `Kontynuuj`/`Continue` submit button are now found via locale-agnostic selectors and submitted with a trusted click on the real button element plus an Enter keypress, fixing automated login silently stalling.
-- **AliExpress reported a false "verification required" after a successful login** – a successful sign-in redirects to the store homepage (e.g. `pl.aliexpress.com/?gatewayAdapt=glo2pol`), which has none of the coin-page markers `_is_logged_in()` looks for, so the bot wrongly fired a VNC "enter your 6-digit code" alert while actually logged in. `_is_logged_in()` now also recognizes the signed-in store homepage (account/sign-out menu), and `_ensure_logged_in()` accepts being redirected off the login page onto the aliexpress.com store as success (`_left_login_for_store()`, mirroring the upstream `waitForURL` check).
-- **AliExpress check-in silently reported success on unrendered pages or failed clicks** – previously (`v1.3`), `_verify_check_in()` defaulted its status to `"checked in / active"` before checking for buttons. When the check-in widget failed to render or no `Collect` button was found, the bot silently logged success and sent false notifications (`checked in / active`), masking missed check-ins and breaking day-streaks. Now, if the widget doesn't render after retries or a collect click cannot be confirmed, `aliexpress.py` logs an error, saves failure diagnostics (`data/ae_checkin_fail.html` and screenshot), offers manual collection via VNC, and honestly reports failure (`⚠️ NOT collected, widget did not render`) if uncollected.
-- **Chrome app-scheme confirmation dialogs still appeared** – `xdg-open` stub only made launches harmless after clicking the dialog. Added Chrome `AutoLaunchProtocolsFromOrigins` policy in `Dockerfile` so schemes (`aliexpress://`, `alipay://`, etc.) auto-launch without prompting. Extended DOM-blocking JS to cover all vectors (window.open, injected iframes, pre-existing links).
-- **Scheduler crashed when `SCHEDULER_HOURS >= 24` ([#22](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/22))** – `main.py` previously passed `SCHEDULER_HOURS` into a cron expression (`CronTrigger(hour=f"*/{cfg.scheduler_hours}")`), causing a crash (`ValueError: Error validating expression '*/24': the step value is higher than the total range`) when set to 24 hours or more. Replaced `CronTrigger` with APScheduler's `IntervalTrigger(hours=cfg.scheduler_hours)` so `SCHEDULER_HOURS` now cleanly supports any positive interval (e.g. `1`, `12`, `24`, `48`, `72` hours) without range restrictions.
-- **Epic 2FA code screen refreshed in a loop so codes couldn't be entered ([#21](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/21))** – `epic.py` only auto-handled the authenticator (TOTP) method via `EG_OTPKEY`; for email/SMS codes the automated login loop kept re-navigating and re-typing email/password, wiping the code screen every attempt. It now detects the MFA screen (`input[name="code-input-0"]` / the `/id/login/mfa` URL, the same field for email, SMS and authenticator), auto-fills TOTP when `EG_OTPKEY` is set, and otherwise STOPS re-driving the page and waits on the code screen with a Discord/Apprise "enter your 2FA code" prompt so you can type it via VNC (a Cloudflare/Talon "One more step" check can appear on the same screen and is included in the prompt). New `_mfa_prompt_present()` / `_fill_totp()` helpers.
-- **Amazon Luna / Prime Gaming login clicked the wrong "Sign in with Passkey" button ([#13](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/13))** – login looped ("attempt N/5", "Session lost", "No passkeys for this account") because `_ensure_logged_in()` clicked the sign-in button via a fuzzy `page.find("Sign in")` text search, which also matches "**Sign in** with a passkey"; and the passkey neutralization only disabled the WebAuthn API without removing Amazon's rendered passkey form. `prime.py` now clicks Luna's exact `button[data-a-target="sign-in-button"]`, and its injected script strips Amazon's `signInWithPasskeyButton` / `signInWithMShopButton` forms so only the password form (`form[name="signIn"]` → `#ap_password` + `#signInSubmit`) can be used. If a passkey error still appears (`#passkey-error-alert`), the bot stops looping and asks you to finish login via VNC with a notification.
-- **"Failed to connect to browser" after days of running ([#19](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/19))** – every store eventually failed to launch Chrome. Root cause: `close_browser()` only ran nodriver's `stop()`, which terminates the parent Chrome but leaves its child processes (zygote/renderer/GPU) alive; and a failed `uc.start()` raises before returning a handle, so the Chrome it already spawned is orphaned and keeps the profile lock. These pile up over scheduled runs until no new browser can start. `src/core/claimer.py` now kills the whole Chrome process tree on close (via `psutil`), retries `uc.start()` up to 3× while sweeping any orphaned Chrome bound to that store's profile and clearing stale `Singleton*` lock files between attempts, and raises a clear error if it still can't start. No profile/session data is touched, so store logins in the volume are preserved.
-- **Docker build hangs on slow/stuck mirrors** – added IPv4 forcing and timeouts to apt configuration so stuck downloads retry instead of hanging indefinitely.
 
 ### Changed
 - **AliExpress stealth switched to a real-device fingerprint (`browserforge`)** – replaced the hand-written UA/WebGL/navigator spoofs (incomplete and internally inconsistent, the very thing Alibaba's risk engine detects) with a COMPLETE Android-phone fingerprint sampled from real devices (UA, `Sec-CH-UA` client-hints, screen, navigator, WebGL, codecs), injected as one coherent unit via CDP and cached per profile (`fgc_fingerprint.json`) so the bot presents the SAME phone every day. Mirrors the proven upstream stealth stack.
@@ -170,6 +221,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 - **Unused `LOGIN_TIMEOUT` config** – the `login_timeout` field in `src/core/config.py` was defined but never read anywhere in the code (distinct from the active `VNC_LOGIN_TIMEOUT`); removed.
+
+### Fixed
+- **Captchas suddenly appearing on every store** – enabling the `Page` CDP domain (needed so `addScriptToEvaluateOnNewDocument` isn't silently ignored) made the old hand-rolled desktop stealth JS actually run for the first time, and its HARD-CODED values (`Win32` platform, `NVIDIA GTX 1650` WebGL, fake plugins) don't match the real headful/VNC container (no NVIDIA GPU, Linux), that inconsistency is a bot tell and started triggering captchas across Steam, Epic, GOG and Prime at once. `BaseClaimer.inject_base_stealth` now defaults to `False`, so those stores use nodriver's clean native fingerprint again (verified live: WebGL reports the real renderer, `navigator.webdriver === false`).
+- **Cloudflare / captcha challenges never sent an alert** – a human-check (Cloudflare "Just a moment… / Verify you are human", or an hCaptcha/Arkose login challenge) was either only logged or silently treated as "no games"/"not signed in", with no notification. New shared `BaseClaimer._human_challenge_present()` detects them and `_wait_out_challenge()` first lets a managed challenge auto-pass, then sends a Discord/Apprise push with the VNC link and waits for you to solve it. `epic.py` checks for it up front (Cloudflare can gate `store.epicgames.com` *before* login, otherwise it just looped "attempt 1/3") and again during login; `steam.py` checks it on the SteamDB page instead of silently reporting no free games.
+- **Navigator property spoofs threw mid-injection** – missing `configurable: true` on base stealth properties caused per-store overrides to throw and abort. All navigator spoofs in `src/core/claimer.py` now use `configurable: true` so per-store overrides can layer safely.
+- **`navigator.webdriver` spoofed as `undefined`** – real Chrome never reports `undefined`, always `false`. Now only patches when it's genuinely `true`, spoofing `false` instead.
+- **AliExpress login form not detected in non-English locales** – the email/phone field (localized placeholder, plain `type=text`) and the `Kontynuuj`/`Continue` submit button are now found via locale-agnostic selectors and submitted with a trusted click on the real button element plus an Enter keypress, fixing automated login silently stalling.
+- **AliExpress reported a false "verification required" after a successful login** – a successful sign-in redirects to the store homepage (e.g. `pl.aliexpress.com/?gatewayAdapt=glo2pol`), which has none of the coin-page markers `_is_logged_in()` looks for, so the bot wrongly fired a VNC "enter your 6-digit code" alert while actually logged in. `_is_logged_in()` now also recognizes the signed-in store homepage (account/sign-out menu), and `_ensure_logged_in()` accepts being redirected off the login page onto the aliexpress.com store as success (`_left_login_for_store()`, mirroring the upstream `waitForURL` check).
+- **AliExpress check-in silently reported success on unrendered pages or failed clicks** – previously (`v1.3`), `_verify_check_in()` defaulted its status to `"checked in / active"` before checking for buttons. When the check-in widget failed to render or no `Collect` button was found, the bot silently logged success and sent false notifications (`checked in / active`), masking missed check-ins and breaking day-streaks. Now, if the widget doesn't render after retries or a collect click cannot be confirmed, `aliexpress.py` logs an error, saves failure diagnostics (`data/ae_checkin_fail.html` and screenshot), offers manual collection via VNC, and honestly reports failure (`⚠️ NOT collected, widget did not render`) if uncollected.
+- **Chrome app-scheme confirmation dialogs still appeared** – `xdg-open` stub only made launches harmless after clicking the dialog. Added Chrome `AutoLaunchProtocolsFromOrigins` policy in `Dockerfile` so schemes (`aliexpress://`, `alipay://`, etc.) auto-launch without prompting. Extended DOM-blocking JS to cover all vectors (window.open, injected iframes, pre-existing links).
+- **Scheduler crashed when `SCHEDULER_HOURS >= 24` ([#22](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/22))** – `main.py` previously passed `SCHEDULER_HOURS` into a cron expression (`CronTrigger(hour=f"*/{cfg.scheduler_hours}")`), causing a crash (`ValueError: Error validating expression '*/24': the step value is higher than the total range`) when set to 24 hours or more. Replaced `CronTrigger` with APScheduler's `IntervalTrigger(hours=cfg.scheduler_hours)` so `SCHEDULER_HOURS` now cleanly supports any positive interval (e.g. `1`, `12`, `24`, `48`, `72` hours) without range restrictions.
+- **Epic 2FA code screen refreshed in a loop so codes couldn't be entered ([#21](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/21))** – `epic.py` only auto-handled the authenticator (TOTP) method via `EG_OTPKEY`; for email/SMS codes the automated login loop kept re-navigating and re-typing email/password, wiping the code screen every attempt. It now detects the MFA screen (`input[name="code-input-0"]` / the `/id/login/mfa` URL, the same field for email, SMS and authenticator), auto-fills TOTP when `EG_OTPKEY` is set, and otherwise STOPS re-driving the page and waits on the code screen with a Discord/Apprise "enter your 2FA code" prompt so you can type it via VNC (a Cloudflare/Talon "One more step" check can appear on the same screen and is included in the prompt). New `_mfa_prompt_present()` / `_fill_totp()` helpers.
+- **Amazon Luna / Prime Gaming login clicked the wrong "Sign in with Passkey" button ([#13](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/13))** – login looped ("attempt N/5", "Session lost", "No passkeys for this account") because `_ensure_logged_in()` clicked the sign-in button via a fuzzy `page.find("Sign in")` text search, which also matches "**Sign in** with a passkey"; and the passkey neutralization only disabled the WebAuthn API without removing Amazon's rendered passkey form. `prime.py` now clicks Luna's exact `button[data-a-target="sign-in-button"]`, and its injected script strips Amazon's `signInWithPasskeyButton` / `signInWithMShopButton` forms so only the password form (`form[name="signIn"]` → `#ap_password` + `#signInSubmit`) can be used. If a passkey error still appears (`#passkey-error-alert`), the bot stops looping and asks you to finish login via VNC with a notification.
+- **"Failed to connect to browser" after days of running ([#19](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/issues/19))** – every store eventually failed to launch Chrome. Root cause: `close_browser()` only ran nodriver's `stop()`, which terminates the parent Chrome but leaves its child processes (zygote/renderer/GPU) alive; and a failed `uc.start()` raises before returning a handle, so the Chrome it already spawned is orphaned and keeps the profile lock. These pile up over scheduled runs until no new browser can start. `src/core/claimer.py` now kills the whole Chrome process tree on close (via `psutil`), retries `uc.start()` up to 3× while sweeping any orphaned Chrome bound to that store's profile and clearing stale `Singleton*` lock files between attempts, and raises a clear error if it still can't start. No profile/session data is touched, so store logins in the volume are preserved.
+- **Docker build hangs on slow/stuck mirrors** – added IPv4 forcing and timeouts to apt configuration so stuck downloads retry instead of hanging indefinitely.
 
 ## [1.3] - 2026-07-05
 
@@ -211,7 +277,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Security
 - **CodeQL URL validation alerts** - replaced unsafe URL substring host checks with strict parsed hostname validation, including controlled subdomain allowance where required.
 
-## [1.1] – 2026-06-08
+## [1.1] - 2026-06-08
 
 ### Added
 - **Docker GHCR modernization (PR #5 by @Ch4r0ne)** – elegantly overhauled the GHCR image publishing workflow utilizing the official `docker/metadata-action`, standardizing dynamic tags (`main`, `latest`, `v*.*`) seamlessly via a dedicated `.github/workflows/docker-ghcr.yml`.
@@ -229,10 +295,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Epic Checkout Core Migration** – Standardized DOM matching patterns to gracefully navigate around arbitrary whitespace, and instituted cross-origin iframe (CDP `create_isolated_world`) boundary penetration logic to combat Epic's redesigned containerized checkout overlay flow.
 - **Epic European Compliance** – Developed automatic acknowledgement for the new European Union "Right of Withdrawal" blocking modal required during cart transactions.
-- **Removed `STEAM_USE_GAMERPOWER`** – Steam claiming now relies exclusively on SteamDB (`https://steamdb.info/upcoming/free/`) directly. GamerPower execution is handled by the unified module via the `STORES` array configuration, simplifying `.env`.
 - **Improved Platform detection** – games were sometimes showing as "unknown" platform; the slug parser now scans all URL segments instead of only the last one (e.g. `/claims/game-name-gog/dp/` now correctly detects GOG).
 - **Hardened Steam paid content guard** – verifies items are genuinely free (-100% / 0.00) before clicking any claim button, skipping paid DLCs to prevent accidental purchases.
 - **Improved Discord 2FA notification** – removed duplicate notification with an ugly `<your-host>` placeholder; the VNC handler already sends a clean clickable `localhost` URL.
+
+### Removed
+- **Removed `STEAM_USE_GAMERPOWER`** – Steam claiming now relies exclusively on SteamDB (`https://steamdb.info/upcoming/free/`) directly. GamerPower execution is handled by the unified module via the `STORES` array configuration, simplifying `.env`.
 
 ### Fixed
 - **Steam Base Game prerequisites (DLC)** – Steam module natively detects if a free DLC requires a base game, automatically pausing to acquire the required base game (if it is also free) before proceeding with the DLC.
@@ -247,42 +315,53 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **GOG auth timeouts** – expanded the login redirect patience from 14s to 26s to gracefully bridge heavily loaded regional GOG network backends without artificially triggering a VNC captcha warning.
 - **Epic Games order confirmation** – fixed timeout errors by detecting the new "It's all yours" dialog and clicking `Continue browsing`.
 - **VNC timeout behavior** – decluttered continuous waiting loop logs across all stores, silencing logs to fire only once every 60s, while gracefully extending the manual threshold limits defaults to 3 minutes.
-
-### Unresolved / To Do
-- **GOG translation interference** – disabled Chrome's automated Google Translate popup during login via JS `translate="no"` DOM injection and bypassed keyboard focus loss by writing login credentials directly to React's element state via `window.HTMLInputElement.prototype`. Further investigation needed to fully suppress popup across deeply cached legacy profiles – low priority as it does not affect functionality.
+- **GOG translation interference** – disabled Chrome's automated Google Translate popup during login via JS `translate="no"` DOM injection and bypassed keyboard focus loss by writing login credentials directly to React's element state via `window.HTMLInputElement.prototype`.
 
 ## [1.0] - 2026-05-13
 
-### Architecture
-- Complete rewrite from Node.js (Playwright) to **Python 3 + nodriver** for stealth browser automation
-- ACID-compliant **SQLite** database via SQLAlchemy replaces volatile `.json` file writes
-- Object-oriented `BaseClaimer` class – all store modules inherit unified browser management
-- **APScheduler** cron-based scheduling replaces shell-level `sleep` loops
-- Multi-arch Docker support: `linux/amd64` (Google Chrome) + `linux/arm64` (Chromium)
+### Added
+- **Architecture**
+  - Complete rewrite from Node.js (Playwright) to **Python 3 + nodriver** for stealth browser automation
+  - ACID-compliant **SQLite** database via SQLAlchemy replaces volatile `.json` file writes
+  - Object-oriented `BaseClaimer` class – all store modules inherit unified browser management
+  - **APScheduler** cron-based scheduling replaces shell-level `sleep` loops
+  - Multi-arch Docker support: `linux/amd64` (Google Chrome) + `linux/arm64` (Chromium)
+- **Store Modules**
+  - **Steam** (`src/stores/steam.py`) – Entirely new auto-claimer (original JS only scraped profiles)
+    - Queries SteamDB for free-to-keep games
+    - Claim button priority: `add_to_account` -> discount form -> `freeGameBtn` fallback
+    - Automatic Steam Guard / 2FA login support
+  - **Epic Games** (`src/stores/epic.py`) – Headful nodriver bypasses hCaptcha checkpoints
+  - **Prime Gaming** (`src/stores/prime.py`)
+    - URL slug-based platform detection (`-gog/dp/`, `-epic/dp/`, `-legacy/dp/`, `-aga/dp/`)
+    - Direct navigation to detail pages – no more "Could not click" failures
+    - Export codes to `prime-gaming.json` alongside SQLite
+    - Automatic GOG code extraction and forwarding to GOG module for redemption
+    - Account-linked platforms (Epic, Amazon) correctly identified and skipped
+  - **GOG** (`src/stores/gog.py`) – Direct auth page navigation, session persistence via `--restore-last-session`
+    - Automatic redemption of GOG codes from Prime Gaming
+    - Redemption guard: only triggers when pending codes exist or `GOG_FORCE_REDEEM` is set
+- **Infrastructure**
+  - **VNC login fallback**: Configurable timeout for manual browser login via noVNC
+  - **Discord/Apprise notifications**: Granular `.env` triggers, game list formatting
+  - **Typed configuration** (`src/core/config.py`): Strict `.env` parsing into Python `Config` class
+  - **Startup banner**: Displays version and author on every launch
 
-### Store Modules
-- **Steam** (`src/stores/steam.py`) – Entirely new auto-claimer (original JS only scraped profiles)
-  - Queries SteamDB for free-to-keep games
-  - Claim button priority: `add_to_account` -> discount form -> `freeGameBtn` fallback
-  - Automatic Steam Guard / 2FA login support
-- **Epic Games** (`src/stores/epic.py`) – Headful nodriver bypasses hCaptcha checkpoints
-- **Prime Gaming** (`src/stores/prime.py`)
-  - URL slug-based platform detection (`-gog/dp/`, `-epic/dp/`, `-legacy/dp/`, `-aga/dp/`)
-  - Direct navigation to detail pages – no more "Could not click" failures
-  - Export codes to `prime-gaming.json` alongside SQLite
-  - Automatic GOG code extraction and forwarding to GOG module for redemption
-  - Account-linked platforms (Epic, Amazon) correctly identified and skipped
-- **GOG** (`src/stores/gog.py`) – Direct auth page navigation, session persistence via `--restore-last-session`
-  - Automatic redemption of GOG codes from Prime Gaming
-  - Redemption guard: only triggers when pending codes exist or `GOG_FORCE_REDEEM` is set
-
-### Infrastructure
-- **VNC login fallback**: Configurable timeout for manual browser login via noVNC
-- **Discord/Apprise notifications**: Granular `.env` triggers, game list formatting
-- **Typed configuration** (`src/core/config.py`): Strict `.env` parsing into Python `Config` class
-- **Startup banner**: Displays version and author on every launch
-
-### Removed from Original
+### Removed
 - ❌ `aliexpress.js` – Out of scope (not gaming)
 - ❌ `unrealengine.js` – Out of scope
 - ❌ `steam-games.js` – Only scraped profiles, never claimed games
+
+[unreleased]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.11...dev
+[1.11]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.10...v1.11
+[1.10]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.9...v1.10
+[1.9]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.8...v1.9
+[1.8]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.7...v1.8
+[1.7]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.6...v1.7
+[1.6]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.5...v1.6
+[1.5]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.4...v1.5
+[1.4]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.3...v1.4
+[1.3]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.2...v1.3
+[1.2]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.1...v1.2
+[1.1]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/compare/v1.0...v1.1
+[1.0]: https://github.com/P-Adamiec/Free-Games-Claimer-Remaster/releases/tag/v1.0

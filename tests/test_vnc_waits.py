@@ -187,3 +187,81 @@ class TestTheFormIsWaitedFor:
         block = self.SOURCE.split("async def _resubmit_when_form_returns", 1)[1] \
             .split("\n    async def ", 1)[0]
         assert "No sign-in form came back" in block
+
+
+class TestEpicLeavesTheChallengeOnScreen:
+    """You were sent to the browser to solve a captcha and found the store page instead."""
+
+    SOURCE = (ROOT / "src" / "stores" / "epic.py").read_text(encoding="utf-8")
+
+    def test_the_bot_finishes_the_sign_in_once_you_clear_the_check(self):
+        # You solved the captcha and the filled form just sat there waiting for a click.
+        branch = self.SOURCE.split("Captcha / security challenge detected", 1)[1].split("break", 1)[0]
+        assert "_wait_out_challenge(" in branch
+        assert "_press_sign_in()" in branch
+
+    def test_a_captcha_hands_over_before_any_navigation(self):
+        loop = self.SOURCE.split("The wait loop can also run out of time", 1)[1]
+        handover = loop.index("if mfa_manual or challenge_blocked:")
+        assert handover < loop.index("await self.page.get(URL_CLAIM)")
+
+
+class TestOnlyAVisibleChallengeCounts:
+    """Epic keeps a full size hCaptcha frame on every sign-in page, hidden by style until needed.
+
+    Checked against a real browser: the plain sign-in page reads as no challenge, while a
+    visible widget, the Cloudflare wording and its page title all still read as one.
+    """
+
+    SOURCE = (ROOT / "src" / "core" / "claimer.py").read_text(encoding="utf-8")
+    JS = SOURCE.split("CHALLENGE_JS = ", 1)[1].split('"""', 2)[1]
+
+    def test_the_page_check_runs_this_script(self):
+        body = self.SOURCE.split("async def _human_challenge_present", 1)[1].split("\n    async def ", 1)[0]
+        assert "evaluate(CHALLENGE_JS)" in body
+
+    def test_a_widget_hidden_by_style_is_not_a_challenge(self):
+        assert "visibility === 'hidden'" in self.JS
+        assert "parseFloat(st.opacity) < 0.1" in self.JS
+
+    def test_a_widget_something_else_covers_is_not_a_challenge(self):
+        assert "elementFromPoint" in self.JS
+
+    def test_every_provider_goes_through_that_same_check(self):
+        assert "&& seen(f)" in self.JS
+        assert "widgets.some(seen)" in self.JS
+
+    def test_the_page_wide_interstitials_still_count(self):
+        assert "just a moment" in self.JS
+        assert "verify you are human" in self.JS
+
+
+class TestAChallengeSeenElsewhere:
+    """A checkout frame hides its captcha from the page check, so the wait can be told where to look."""
+
+    SOURCE = (ROOT / "src" / "core" / "claimer.py").read_text(encoding="utf-8")
+    WAIT = SOURCE.split("async def _wait_out_challenge", 1)[1].split("\n    async def ", 1)[0]
+
+    def test_the_default_is_still_the_page(self):
+        assert "present = present_fn or self._human_challenge_present" in self.WAIT
+
+    def test_both_the_settle_and_the_handover_use_it(self):
+        assert self.WAIT.count("await present()") == 2
+        assert "_human_challenge_present()" not in self.WAIT.split("present = ", 1)[1]
+
+
+class TestRecaptchaOnUbisoft:
+    """Ubisoft's sign-in shows reCAPTCHA Enterprise when it doubts a login, and the bot never saw it.
+
+    Checked in a real browser: a visible picture challenge (bframe) and the checkbox count, a hidden
+    bframe and an invisible reCAPTCHA's corner badge do not.
+    """
+
+    JS = (ROOT / "src" / "core" / "claimer.py").read_text(encoding="utf-8").split("CHALLENGE_JS = ", 1)[1].split('"""', 2)[1]
+
+    def test_the_picture_challenge_is_a_challenge(self):
+        assert "(anchor|bframe)" in self.JS
+
+    def test_the_invisible_badge_is_not(self):
+        assert "size=invisible" in self.JS
+        assert "!badge(f) && seen(f)" in self.JS

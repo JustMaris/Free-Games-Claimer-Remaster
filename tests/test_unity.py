@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.stores.unity import (UnityClaimer, _package_id, _slug, checkout_blockers,
-                              parse_free_asset, parse_total)
+from src.stores.unity import (UnityClaimer, _package_id, _slug, asset_name_from_title,
+                              checkout_blockers, parse_free_asset, parse_total)
 
 # What assetstore.unity.com/publisher-sale served on 2026-08-09.
 REAL_TEXT = (
@@ -49,10 +49,33 @@ class TestRealPage:
         ("/packages/tools/some-2019-pack-123456", "123456"),
         ("/packages/tools/no-number-here", ""),
         ("", ""),
+        # Since 2026-10-01 the gift link is the bare id, which used to give no number at all.
+        ("/packages/package/id/250947", "250947"),
+        ("/packages/package/id/250947/", "250947"),
     ])
     def test_package_id_is_the_number_entitlements_reports(self, href, expected):
         # The entitlements API answers with productId "46039", never the whole slug.
         assert _package_id(href) == expected
+
+    def test_a_bare_id_link_still_makes_a_full_giveaway(self):
+        state = dict(REAL_STATE, giftLinks=[dict(REAL_LINK, href="/packages/package/id/250947")])
+        asset = parse_free_asset(state)
+        assert asset["package_id"] == "250947" and asset["slug"] == "250947"
+
+
+class TestTheAssetPageNamesTheAsset:
+    """28.09: the sale heading still said PathGrid while its link already led to Magic Time."""
+
+    @pytest.mark.parametrize("title,expected", [
+        ("USA Real-World Heightmaps - Vol.1 | 3D Landscapes | Unity Asset Store", "USA Real-World Heightmaps - Vol.1"),
+        ("PathGrid | Level Design | Unity Asset Store", "PathGrid"),
+        ("Unity Asset Store", ""),
+        ("Sign in | Unity ID", ""),
+        ("", ""),
+        (None, ""),
+    ])
+    def test_the_name_comes_from_a_store_tab_title_only(self, title, expected):
+        assert asset_name_from_title(title) == expected
 
 
 class TestCouponGuard:
